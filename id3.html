@@ -1,0 +1,905 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ID3: Дерево решений для задачи "Прогноз погоды"</title>
+
+    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { background: #f4f7f6; min-height: 100vh; display: flex; justify-content: center; align-items: flex-start; padding: 40px 20px; color: #343a40; }
+        .container { width: 100%; max-width: 1400px; background: white; padding: 40px; border-radius: 20px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.07); }
+        header, section { margin-bottom: 30px; }
+        h1 { text-align: center; font-size: 2.2rem; color: #1e3a5f; margin-bottom: 10px; }
+        h2 { font-size: 1.5rem; color: #1e88e5; margin-bottom: 20px; padding-bottom: 8px; border-bottom: 2px solid #1e88e5; display: inline-block; }
+        p { margin-bottom: 15px; line-height: 1.7; color: #495057; }
+        .controls-container { display: flex; flex-wrap: wrap; gap: 15px; justify-content: center; margin-bottom: 25px; }
+        button { padding: 12px 25px; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.2s ease; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); }
+        button:hover { transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15); }
+        button:active { transform: translateY(0px); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1); }
+        .btn-primary { background: #1e88e5; color: white; }
+        .btn-primary:hover { background: #1976d2; }
+        .btn-secondary { background: #6c757d; color: white; }
+        .btn-secondary:hover { background: #5a6268; }
+        .btn-warning { background: #f39c12; color: white; }
+        .btn-warning:hover { background: #d68910; }
+        .btn-danger { background: #e74c3c; color: white; padding: 6px 12px; font-size: 14px; }
+        .btn-danger:hover { background: #c0392b; }
+        .btn-delete-col { background: #e74c3c; color: white; border-radius: 50%; width: 22px; height: 22px; padding: 0; font-size: 12px; line-height: 22px; text-align: center; margin-left: 8px; border: none; cursor: pointer; display: inline-block; vertical-align: middle; }
+        .btn-delete-col:hover { background: #c0392b; }
+        .btn-random { background: #9b59b6; color: white; }
+        .btn-random:hover { background: #8e44ad; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 20px; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+        th, td { border: 1px solid #dee2e6; padding: 6px; text-align: center; }
+        th { background-color: #f8f9fa; color: #495057; font-weight: 600; position: relative; }
+        td[contenteditable="true"]:hover, td[contenteditable="true"]:focus { background-color: #eaf2f8; outline: 2px solid #1e88e5; outline-offset: -2px; }
+        .step { background: #f8f9fa; border-radius: 12px; padding: 20px; border: 1px solid #e9ecef; margin-top: 20px; }
+        .step-title { font-size: 1.1rem; font-weight: 600; color: #1e3a5f; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #ddd; }
+        .calculation-block { margin: 15px 0; padding-left: 15px; border-left: 3px solid #1e88e5; }
+        .calculation-block h4 { color: #495057; font-size: 1rem; margin: 0 0 8px 0; }
+        .choice { background: #eaf2f8; border: 1px solid #1e88e5; border-radius: 8px; padding: 15px; margin-top: 20px; }
+        #tree-viz { height: 800px; width: 100%; border-radius: 12px; border: 1px solid #dee2e6; background-color: #fdfdfd; }
+        #decision-formulas-wrap { margin-bottom: 28px; padding: 20px; background: #f8fafc; border-radius: 12px; border: 1px solid #dee2e6; }
+        #decision-formulas-wrap h3 { font-size: 1.15rem; color: #1e3a5f; margin-bottom: 8px; }
+        .formulas-intro { color: #5a6268; font-size: 0.9rem; margin-bottom: 14px; }
+        #decision-formulas-list { display: flex; flex-wrap: wrap; gap: 16px; }
+        #decision-formulas-list .decision-formula-block { flex: 1; min-width: 280px; padding: 14px 18px; background: white; border-radius: 8px; border-left: 4px solid #1e88e5; font-family: 'Consolas', 'Monaco', monospace; font-size: 0.95rem; }
+        #decision-formulas-list .decision-formula-block .formula-value { font-weight: 700; color: #1e88e5; }
+        .results-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }
+        #projection-section { margin-top: 30px; padding: 24px; background: #f8fafc; border-radius: 12px; border: 1px solid #dee2e6; }
+        #projection-section h3 { font-size: 1.2rem; color: #1e3a5f; margin-bottom: 16px; }
+        .axis-controls { display: flex; flex-wrap: wrap; gap: 20px; align-items: center; margin-bottom: 20px; }
+        .axis-controls label { display: flex; align-items: center; gap: 8px; font-weight: 600; color: #495057; }
+        .axis-controls select { padding: 8px 12px; border-radius: 8px; border: 1px solid #ced4da; font-size: 1rem; min-width: 180px; }
+        #projection-matrix-wrap { overflow-x: auto; margin-top: 16px; }
+        #projection-matrix { border-collapse: collapse; font-size: 0.95rem; box-shadow: 0 2px 8px rgba(0,0,0,0.06); border-radius: 8px; overflow: hidden; }
+        #projection-matrix th, #projection-matrix td { border: 1px solid #dee2e6; padding: 12px 16px; text-align: center; min-width: 90px; max-width: 220px; }
+        #projection-matrix td { vertical-align: top; }
+        #projection-matrix td div { word-break: break-word; line-height: 1.3; }
+        #projection-matrix th { background: #eaf2f8; color: #1e3a5f; font-weight: 600; }
+        #projection-matrix th.axis-y { background: #f0f4f8; }
+        #projection-matrix td.cell-empty { background: #f1f3f5; color: #868e96; }
+        .projection-legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 16px; align-items: center; font-size: 0.9rem; }
+        .projection-legend span { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 6px; border: 1px solid; }
+        code { background-color: #e9ecef; padding: 3px 6px; border-radius: 4px; font-family: 'Courier New', Courier, monospace; }
+        .result { font-weight: bold; color: #e74c3c }
+        .entropy-formula { font-family: 'Courier New', monospace; margin: 5px 0; }
+        .entropy-value { background: #f0f8ff; padding: 5px; border-radius: 4px; margin: 5px 0; }
+        .formula-section { background: linear-gradient(135deg, #f0f7ff 0%, #e8f4fd 100%); border-radius: 12px; padding: 24px; margin-bottom: 25px; border: 1px solid #b3d9f2; }
+        .formula-section h3 { color: #1e3a5f; font-size: 1.25rem; margin-bottom: 18px; padding-bottom: 8px; border-bottom: 2px solid #1e88e5; }
+        .formula-block { margin-bottom: 20px; padding: 14px 18px; background: white; border-radius: 8px; border-left: 4px solid #1e88e5; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+        .formula-block h4 { color: #495057; font-size: 0.95rem; margin: 0 0 8px 0; font-weight: 600; }
+        .formula-display { font-family: 'Cambria Math', 'Latin Modern Math', 'STIX Two Math', serif; font-size: 1.15rem; color: #1e3a5f; margin: 10px 0; padding: 12px 16px; background: #f8fafc; border-radius: 6px; text-align: center; letter-spacing: 0.02em; }
+        .formula-block p { margin: 8px 0 0 0; font-size: 0.9rem; color: #5a6268; line-height: 1.5; }
+        .formula-result { border-left-color: #28a745; background: #f0fff4; }
+        .formula-result .formula-display { background: #e8f5e9; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Индуктивный метод построения дерева решений: ID3</h1>
+            <p>Датасет: "Прогноз приятной погоды" — решение на основе погодных условий.</p>
+        </header>
+
+        <section id="data-section">
+            <h2>Набор данных</h2>
+            <p>Исходные данные: вы можете добавлять/удалять строки и столбцы, редактировать значения.</p>
+            <div class="controls-container">
+                <button class="btn-secondary" id="addColumnButton">Добавить столбец</button>
+                <button class="btn-primary" id="addRowButton">Добавить строку</button>
+                <button class="btn-random" id="randomTableButton">Случайная таблица</button>
+                <button class="btn-warning" id="resetButton">Сбросить данные к исходным</button>
+            </div>
+            <table id="dataTable">
+                <thead></thead>
+                <tbody></tbody>
+            </table>
+        </section>
+
+        <div style="text-align: center; margin-bottom: 30px;">
+            <button class="btn-primary" id="startButton" style="padding: 15px 40px; font-size: 1.1rem;">Построить / Обновить дерево</button>
+        </div>
+
+        <section id="finalTreeContainer" style="display: none;">
+            <h2>Итоговое дерево решений</h2>
+            <div id="tree-viz"></div>
+        </section>
+
+        <section id="resultsContainer" style="display: none;">
+            <h2 id="resultsTitle">Итоги классификации</h2>
+            <div id="decision-formulas-wrap">
+                <h3>Формулы итоговых решений</h3>
+                <p class="formulas-intro">Одна формула на каждый итог: при выполнении любого из вариантов в скобках получается указанный рейтинг.</p>
+                <div id="decision-formulas-list"></div>
+            </div>
+            <div class="results-grid"></div>
+            <div id="projection-section" style="display: none;">
+                <h3>Проекция решения на 2 параметра</h3>
+                <p style="margin-bottom: 16px; color: #5a6268;">Матрица показывает предсказание дерева для каждой комбинации значений выбранных атрибутов (по данным из таблицы).</p>
+                <div class="axis-controls">
+                    <label>Ось X: <select id="axisXSelect"></select></label>
+                    <label>Ось Y: <select id="axisYSelect"></select></label>
+                </div>
+                <div id="projection-matrix-wrap">
+                    <table id="projection-matrix"></table>
+                </div>
+                <div class="projection-legend" id="projection-legend"></div>
+            </div>
+            <div id="math-formula-wrap" style="margin-top: 25px; background: #f0f4f8; border-radius: 12px; border-left: 5px solid #1e88e5; display: none;">
+                <div style="padding: 12px 20px 0 20px;">
+                    <h3 style="margin-bottom: 10px;">Математическая формула дерева решений</h3>
+                    <div style="display: flex; gap: 12px; margin-bottom: 15px;">
+                        <button id="formulaLogBtn" class="btn-secondary" style="padding: 6px 16px;">Логическая формула</button>
+                        <button id="formulaIfBtn" class="btn-secondary" style="padding: 6px 16px;">Алгоритм if-then-else</button>
+                    </div>
+                </div>
+                <div id="formulaLogical" class="formula-pre-wrap" style="display: block;">
+                    <pre id="math-formula-logical" style="font-family: 'Courier New', monospace; background: #fff; margin: 0 20px 20px 20px; padding: 15px; border-radius: 8px; overflow-x: auto; font-size: 14px; white-space: pre-wrap;"></pre>
+                </div>
+                <div id="formulaIfElse" class="formula-pre-wrap" style="display: none;">
+                    <pre id="math-formula-ifelse" style="font-family: 'Courier New', monospace; background: #fff; margin: 0 20px 20px 20px; padding: 15px; border-radius: 8px; overflow-x: auto; font-size: 14px; white-space: pre-wrap;"></pre>
+                </div>
+            </div>
+        </section>
+
+         <section id="calculationStepsContainer" style="display: none;">
+            <h2>Расчет информативности узлов</h2>
+            <section id="formulaSection" class="formula-section">
+                <h3>Математические формулы для определения итоговой оценки атрибута</h3>
+                <div class="formula-block">
+                    <h4>1. Энтропия множества примеров <em>S</em> (целевой атрибут):</h4>
+                    <div class="formula-display">H(S) = −∑<sub>i</sub> p<sub>i</sub> · log₂(p<sub>i</sub>)</div>
+                    <p>где p<sub>i</sub> — доля примеров класса <em>i</em> в <em>S</em>. Энтропия равна нулю, если все примеры одного класса.</p>
+                </div>
+                <div class="formula-block">
+                    <h4>2. Взвешенная энтропия по атрибуту <em>A</em>:</h4>
+                    <div class="formula-display">H(S|A) = ∑<sub>v∈Values(A)</sub> (|S<sub>v</sub>| / |S|) · H(S<sub>v</sub>)</div>
+                    <p>где S<sub>v</sub> — подмножество примеров с значением атрибута <em>A = v</em>.</p>
+                </div>
+                <div class="formula-block">
+                    <h4>3. Прирост информации (Information Gain):</h4>
+                    <div class="formula-display">Gain(S, A) = H(S) − H(S|A)</div>
+                    <p>Чем больше прирост информации, тем полезнее атрибут для разбиения.</p>
+                </div>
+                <div class="formula-block formula-result">
+                    <h4>Итоговая оценка и выбор атрибута:</h4>
+                    <div class="formula-display">A<sub>best</sub> = argmax<sub>A</sub> Gain(S, A) = argmin<sub>A</sub> H(S|A)</div>
+                    <p>На каждом шаге ID3 выбирает атрибут с <strong>максимальным приростом информации</strong> (или минимальной взвешенной энтропией).</p>
+                </div>
+            </section>
+            <div id="steps-content"></div>
+        </section>
+    </div>
+
+    <script>
+        // НОВЫЙ ДАТАСЕТ: погода и целевой атрибут "приятная погода?"
+        const rawWeatherData = [
+            { "состояние неба": "ясно", "температура": "жарко", "влажность": "высокая", "ветер": "слабый", "приятная погода?": "нет" },
+            { "состояние неба": "ясно", "температура": "жарко", "влажность": "высокая", "ветер": "сильный", "приятная погода?": "нет" },
+            { "состояние неба": "облачно", "температура": "жарко", "влажность": "нормальная", "ветер": "слабый", "приятная погода?": "нет" },
+            { "состояние неба": "дождь", "температура": "тепло", "влажность": "высокая", "ветер": "слабый", "приятная погода?": "да" },
+            { "состояние неба": "дождь", "температура": "холодно", "влажность": "нормальная", "ветер": "слабый", "приятная погода?": "да" },
+            { "состояние неба": "дождь", "температура": "холодно", "влажность": "нормальная", "ветер": "сильный", "приятная погода?": "нет" },
+            { "состояние неба": "облачно", "температура": "холодно", "влажность": "нормальная", "ветер": "сильный", "приятная погода?": "да" },
+            { "состояние неба": "ясно", "температура": "тепло", "влажность": "высокая", "ветер": "слабый", "приятная погода?": "нет" },
+            { "состояние неба": "ясно", "температура": "холодно", "влажность": "нормальная", "ветер": "слабый", "приятная погода?": "да" },
+            { "состояние неба": "дождь", "температура": "тепло", "влажность": "нормальная", "ветер": "слабый", "приятная погода?": "да" },
+            { "состояние неба": "ясно", "температура": "тепло", "влажность": "нормальная", "ветер": "сильный", "приятная погода?": "да" },
+            { "состояние неба": "облачно", "температура": "тепло", "влажность": "высокая", "ветер": "сильный", "приятная погода?": "нет" },
+            { "состояние неба": "облачно", "температура": "жарко", "влажность": "высокая", "ветер": "слабый", "приятная погода?": "да" },
+            { "состояние неба": "дождь", "температура": "жарко", "влажность": "высокая", "ветер": "сильный", "приятная погода?": "да" },
+            { "состояние неба": "облачно", "температура": "жарко", "влажность": "высокая", "ветер": "сильный", "приятная погода?": "нет" }
+        ];
+
+        const targetAttribute = 'приятная погода?';
+        const protectedColumns = ['№', 'Действия'];
+
+        // Преобразуем в формат с id
+        let initialData = rawWeatherData.map((item, idx) => ({
+            id: idx + 1,
+            [targetAttribute]: item[targetAttribute],
+            ...Object.fromEntries(
+                Object.entries(item).filter(([key]) => key !== targetAttribute)
+            )
+        }));
+
+        let lastBuiltTree = null;
+        let lastBuiltData = null;
+
+        function renderTableHeader(attributes) {
+            const thead = document.querySelector('#dataTable thead');
+            thead.innerHTML = '';
+            const tr = document.createElement('tr');
+            const columns = ['№', targetAttribute, ...attributes, 'Действия'];
+            columns.forEach(colName => {
+                const th = document.createElement('th');
+                th.textContent = colName;
+                if (!protectedColumns.includes(colName)) {
+                    th.setAttribute('contenteditable', 'true');
+                    if (colName !== targetAttribute) {
+                        const delBtn = document.createElement('button');
+                        delBtn.className = 'btn-delete-col';
+                        delBtn.textContent = '×';
+                        delBtn.title = `Удалить столбец "${colName}"`;
+                        delBtn.onclick = handleDeleteColumn;
+                        th.appendChild(delBtn);
+                    }
+                }
+                tr.appendChild(th);
+            });
+            thead.appendChild(tr);
+        }
+
+        function populateTable(data, attributes) {
+            renderTableHeader(attributes);
+            const tbody = document.querySelector('#dataTable tbody');
+            tbody.innerHTML = '';
+            data.forEach(rowData => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `<td>${rowData.id}</td><td contenteditable="true">${rowData[targetAttribute]}</td>` +
+                    attributes.map(attr => `<td contenteditable="true">${rowData[attr] || '?'}</td>`).join('') +
+                    `<td><button class="btn-danger">Удалить</button></td>`;
+                tr.querySelector('.btn-danger').addEventListener('click', () => tr.remove());
+                tbody.appendChild(tr);
+            });
+        }
+
+        function treeToFormula(node, indent = '', isFirst = true) {
+            if (!node) return '';
+            if (node.leaf) {
+                return `${node.leaf}`;
+            }
+            const attr = node.node;
+            const children = node.children;
+            const branches = Object.entries(children).map(([value, child]) => {
+                const subFormula = treeToFormula(child, indent + '  ', false);
+                return `${indent}  если ${attr} = ${value} то ${subFormula}`;
+            });
+            const ifPart = branches.join(`\n${indent}иначе `);
+            return `если\n${ifPart}\n${indent}конец`;
+        }
+
+        // Генерация логической формулы: (условия) → класс ∨ ...
+        function treeToLogicalFormula(node, conditions = []) {
+            if (!node) return [];
+            if (node.leaf) {
+                const condStr = conditions.length === 0 ? "всегда" : `(${conditions.join(' ∧ ')})`;
+                return [`${condStr} → "${node.leaf}"`];
+            }
+            const attr = node.node;
+            const formulas = [];
+            for (const [value, child] of Object.entries(node.children)) {
+                const newConds = [...conditions, `${attr} = "${value}"`];
+                formulas.push(...treeToLogicalFormula(child, newConds));
+            }
+            return formulas;
+        }
+
+        // Генерация if-then-else (вложенные условия)
+        function treeToIfThenElse(node, indent = 0) {
+            if (!node) return '';
+            const spaces = '  '.repeat(indent);
+            if (node.leaf) {
+                return `${spaces}  return "${node.leaf}";`;
+            }
+            const attr = node.node;
+            let result = '';//`${spaces}if (${attr} == value) {\n`;
+            const branches = [];
+            for (const [val, child] of Object.entries(node.children)) {
+                branches.push(`${spaces}  if (${attr} == "${val}") {\n${treeToIfThenElse(child, indent + 1)}\n${spaces}  }`);
+            }
+            result += branches.join(` else `) + `\n${spaces}`;
+            return result;
+        }
+
+        function formatTreeFormula(node, depth = 0) {
+            const indent = '  '.repeat(depth);
+            if (node.leaf) {
+                return `${indent}=> "${node.leaf}";`;
+            }
+            const attr = node.node;
+            let formula = `${indent}if (${attr} == value) {`;
+            const cases = [];
+            for (const [val, child] of Object.entries(node.children)) {
+                cases.push(`${indent}  if (${attr} == "${val}") {\n${formatTreeFormula(child, depth + 2)}\n${indent}  }`);
+            }
+            formula += cases.join(` else `) + `\n${indent}}`;
+            return formula;
+        }
+
+        function handleAddColumn() {
+            const newColName = prompt("Введите название нового столбца (атрибута):");
+            if (!newColName || newColName.trim() === '') return;
+
+            const existingHeaders = getAttributesFromTable();
+            if (existingHeaders.includes(newColName) || newColName === targetAttribute) {
+                alert("Столбец с таким именем уже существует или совпадает с целевым атрибутом!");
+                return;
+            }
+
+            const headerRow = document.querySelector('#dataTable thead tr');
+            const actionsHeader = headerRow.lastElementChild;
+            const newTh = document.createElement('th');
+            newTh.textContent = newColName;
+            newTh.setAttribute('contenteditable', 'true');
+            const delBtn = document.createElement('button');
+            delBtn.className = 'btn-delete-col';
+            delBtn.textContent = '×';
+            delBtn.title = `Удалить столбец "${newColName}"`;
+            delBtn.onclick = handleDeleteColumn;
+            newTh.appendChild(delBtn);
+            headerRow.insertBefore(newTh, actionsHeader);
+
+            document.querySelectorAll('#dataTable tbody tr').forEach(tr => {
+                const newTd = document.createElement('td');
+                newTd.textContent = '?';
+                newTd.setAttribute('contenteditable', 'true');
+                tr.insertBefore(newTd, tr.lastElementChild);
+            });
+        }
+
+        function handleDeleteColumn(event) {
+            const thToDelete = event.target.parentElement;
+            const colIndex = Array.from(thToDelete.parentElement.children).indexOf(thToDelete);
+            if (confirm(`Вы уверены, что хотите удалить столбец "${thToDelete.textContent.replace('×','').trim()}"?`)) {
+                document.querySelectorAll('#dataTable tr').forEach(row => {
+                    row.children[colIndex].remove();
+                });
+            }
+        }
+
+        function getAttributesFromTable() {
+            const headers = Array.from(document.querySelectorAll('#dataTable thead th'))
+                .map(th => th.textContent.replace(/×/g, '').trim());
+            return headers.slice(2, -1).filter(name => name !== '');
+        }
+
+        function parseDataFromTable() {
+            const headers = Array.from(document.querySelectorAll('#dataTable thead th'))
+                .map(th => th.textContent.replace(/×/g, '').trim());
+            const targetCol = headers[1];
+            const attributes = headers.slice(2, -1);
+            const data = [];
+            document.querySelectorAll('#dataTable tbody tr').forEach(tr => {
+                const cells = tr.querySelectorAll('td');
+                if (cells.length < headers.length) return;
+                const rowObject = { id: parseInt(cells[0].textContent.trim(), 10) || 0 };
+                rowObject[targetCol] = cells[1].textContent.trim();
+                attributes.forEach((attr, idx) => {
+                    rowObject[attr] = cells[2 + idx].textContent.trim();
+                });
+                data.push(rowObject);
+            });
+            return data;
+        }
+
+        function handleAddRow() {
+            const attributes = getAttributesFromTable();
+            const dataFromTable = parseDataFromTable();
+            const maxId = dataFromTable.reduce((max, row) => Math.max(max, row.id || 0), 0);
+            const tr = document.createElement('tr');
+            tr.innerHTML = `<td>${maxId + 1}</td><td contenteditable="true">?</td>` +
+                           attributes.map(() => `<td contenteditable="true">?</td>`).join('') +
+                           `<td><button class="btn-danger">Удалить</button></td>`;
+            tr.querySelector('.btn-danger').addEventListener('click', () => tr.remove());
+            document.querySelector('#dataTable tbody').appendChild(tr);
+        }
+
+        function handleReset() {
+            const freshAttributes = Object.keys(initialData[0]).filter(k => k !== 'id' && k !== targetAttribute);
+            populateTable(JSON.parse(JSON.stringify(initialData)), freshAttributes);
+            document.getElementById('calculationStepsContainer').style.display = 'none';
+            document.getElementById('finalTreeContainer').style.display = 'none';
+            document.getElementById('resultsContainer').style.display = 'none';
+        }
+
+        function generateRandomData() {
+            const currentData = parseDataFromTable();
+            const attributes = getAttributesFromTable();
+            if (currentData.length === 0) { alert("Таблица пуста. Добавьте строки."); return; }
+
+            const possibleValues = {};
+            const targetCol = targetAttribute;
+            const allSamples = [...initialData, ...currentData];
+            const targetValues = [...new Set(allSamples.map(item => item[targetCol]).filter(v => v && v !== '?'))];
+            possibleValues[targetCol] = targetValues.length ? targetValues : ['да', 'нет'];
+
+            attributes.forEach(attr => {
+                const vals = [...new Set(allSamples.map(item => item[attr]).filter(v => v && v !== '?'))];
+                possibleValues[attr] = vals.length ? vals : ['?'];
+            });
+
+            const newData = currentData.map(row => {
+                const newRow = { id: row.id };
+                newRow[targetCol] = possibleValues[targetCol][Math.floor(Math.random() * possibleValues[targetCol].length)];
+                attributes.forEach(attr => {
+                    newRow[attr] = possibleValues[attr][Math.floor(Math.random() * possibleValues[attr].length)];
+                });
+                return newRow;
+            });
+            populateTable(newData, attributes);
+            document.getElementById('calculationStepsContainer').style.display = 'none';
+            document.getElementById('finalTreeContainer').style.display = 'none';
+            document.getElementById('resultsContainer').style.display = 'none';
+        }
+
+        function calculateEntropy(dataSet) {
+            if (dataSet.length === 0) return { entropy: 0, counts: {}, total: 0 };
+            const targetCol = targetAttribute;
+            const counts = dataSet.reduce((acc, item) => {
+                const val = item[targetCol];
+                if (val) acc[val] = (acc[val] || 0) + 1;
+                return acc;
+            }, {});
+            let entropy = 0;
+            const total = dataSet.length;
+            Object.values(counts).forEach(cnt => {
+                const p = cnt / total;
+                entropy -= p * Math.log2(p);
+            });
+            return { entropy, counts, total };
+        }
+
+        function id3(dataSet, availableAttributes, stepContext, allPossibleValues) {
+            const { entropy: baseEntropy, counts, total } = calculateEntropy(dataSet);
+            const getMajorityClass = () => Object.keys(counts).length ? Object.entries(counts).reduce((a,b) => a[1] > b[1] ? a : b)[0] : "?";
+
+            if (baseEntropy === 0 || availableAttributes.length === 0) {
+                return { leaf: getMajorityClass(), ids: dataSet.map(i => i.id), entropy: baseEntropy, distribution: counts, total: total };
+            }
+
+            let bestAttribute = '', minEntropy = Infinity;
+            let attributeEntropies = {};
+
+            availableAttributes.forEach(attr => {
+                let weightedEntropy = 0;
+                const uniqueValues = allPossibleValues[attr] || [];
+                const valueDetails = [];
+                uniqueValues.forEach(val => {
+                    const subset = dataSet.filter(item => item[attr] === val);
+                    if (subset.length) {
+                        const subsetEnt = calculateEntropy(subset);
+                        weightedEntropy += (subset.length / dataSet.length) * subsetEnt.entropy;
+                        valueDetails.push({ value: val, count: subset.length, entropy: subsetEnt.entropy, distribution: subsetEnt.counts });
+                    }
+                });
+                if (weightedEntropy < minEntropy) {
+                    minEntropy = weightedEntropy;
+                    bestAttribute = attr;
+                }
+                attributeEntropies[attr] = { entropy: weightedEntropy, valueDetails };
+            });
+
+            let stepHtml = `<div class="step"><div class="step-title">${stepContext} (записей: ${dataSet.length})</div>`;
+            Object.entries(attributeEntropies).forEach(([attr, info]) => {
+                let details = `<div class="calculation-block"><h4>Атрибут: "${attr}"</h4>`;
+                info.valueDetails.forEach(d => {
+                    const distEntries = Object.entries(d.distribution);
+                    let entropyCalc = "";
+                    if (distEntries.length) {
+                        entropyCalc = `H = -(` + distEntries.map(([cls, cnt]) => `${cnt}/${d.count} * log₂(${cnt}/${d.count})`).join(" + ") + `) = ` +
+                            distEntries.map(([cls, cnt]) => { let p = cnt/d.count; return `-${p.toFixed(3)}*${Math.log2(p).toFixed(3)}`; }).join(" + ") + ` = ${d.entropy.toFixed(3)}`;
+                    }
+                    details += `<div class="entropy-value">Значение <b>${attr} = ${d.value}</b> (${d.count} записей):<br/>${entropyCalc}<br/>Распределение: ${distEntries.map(([k,v])=>`${k}:${v}`).join(', ')}</div>`;
+                });
+                details += `<p>Взвешенная энтропия: ${info.valueDetails.map(d => `(${d.count}/${dataSet.length})*${d.entropy.toFixed(3)}`).join(' + ')} = <span class="result">${info.entropy.toFixed(3)}</span></p></div>`;
+                stepHtml += details;
+            });
+            const winnerStyle = 'background:#d4edda; color:#155724; padding:2px 5px; border-radius:4px;';
+            const compare = Object.entries(attributeEntropies).map(([a,inf]) => `<span style="${a===bestAttribute ? winnerStyle : ''}">${a}: ${inf.entropy.toFixed(3)}</span>`).join('; ');
+            stepHtml += `<div class="choice">Сравнение: { ${compare} }<br/><b>Выбран атрибут: "${bestAttribute}"</b> (min энтропия ${minEntropy.toFixed(3)}).</div></div>`;
+            document.getElementById('steps-content').innerHTML += stepHtml;
+
+            const tree = {
+                node: bestAttribute,
+                entropy: minEntropy,
+                baseEntropy: baseEntropy,
+                distribution: counts,
+                total: total,
+                ids: dataSet.map(i => i.id),
+                children: {},
+                alternatives: availableAttributes.filter(a => a !== bestAttribute).map(a => ({ name: a, entropy: attributeEntropies[a].entropy, valueDetails: attributeEntropies[a].valueDetails })),
+                context: stepContext
+            };
+            const remaining = availableAttributes.filter(a => a !== bestAttribute);
+            (allPossibleValues[bestAttribute] || []).forEach(value => {
+                const subset = dataSet.filter(item => item[bestAttribute] === value);
+                if (!subset.length) {
+                    tree.children[value] = { leaf: getMajorityClass(), ids: [], entropy: 0, distribution: {}, total: 0 };
+                } else {
+                    tree.children[value] = id3(subset, remaining, `Ветвь "${bestAttribute} = ${value}"`, allPossibleValues);
+                }
+            });
+            return tree;
+        }
+
+        function runFullProcess() {
+            const currentData = parseDataFromTable();
+            const attributes = getAttributesFromTable();
+            if (!currentData.length) { alert("Таблица пуста."); return; }
+            if (!attributes.length) { alert("Нет атрибутов."); return; }
+
+            document.getElementById('calculationStepsContainer').style.display = 'block';
+            document.getElementById('steps-content').innerHTML = '';
+            const allPossibleValues = attributes.reduce((acc, a) => {
+                acc[a] = [...new Set(currentData.map(r => r[a]).filter(v=>v && v!==''))];
+                return acc;
+            }, {});
+            const tree = id3(currentData, attributes, 'Корневой узел', allPossibleValues);
+            if (tree) {
+                
+                // Генерация и отображение формул
+                const logicalParts = treeToLogicalFormula(tree);
+                const logicalFormula = logicalParts.join(' ∨\n');
+                document.getElementById('math-formula-logical').textContent = logicalFormula;
+
+                const ifElseFormula = treeToIfThenElse(tree);
+                document.getElementById('math-formula-ifelse').textContent = ifElseFormula;
+
+                document.getElementById('math-formula-wrap').style.display = 'block';
+                lastBuiltTree = tree; lastBuiltData = currentData;
+                document.getElementById('finalTreeContainer').style.display = 'block';
+                renderTreeWithVis(tree);
+                document.getElementById('resultsContainer').style.display = 'block';
+                processAndDisplayResults(tree);
+                document.getElementById('projection-section').style.display = 'block';
+                fillAxisSelects();
+                renderProjectionMatrix();
+            }
+        }
+
+        function renderTreeWithVis(tree) {
+            const nodes = [];
+            const edges = [];
+            let nodeId = 0;
+
+            // Цветовая схема для листьев (по классам)
+            const leafColors = [
+                { background: '#fdebd0', border: '#e67e22' }, // оранжевый
+                { background: '#d1f2eb', border: '#1abc9c' }, // зелёный
+                { background: '#e8f4fd', border: '#3498db' }, // синий
+                { background: '#f4e6ff', border: '#9b59b6' }, // фиолетовый
+                { background: '#ffe6e6', border: '#e74c3c' }, // красный
+                { background: '#fef9e7', border: '#f1c40f' }, // жёлтый
+            ];
+            const leafColorMap = new Map();
+
+            function getLeafColor(className) {
+                if (!leafColorMap.has(className)) {
+                    leafColorMap.set(className, leafColors[leafColorMap.size % leafColors.length]);
+                }
+                return leafColorMap.get(className);
+            }
+
+            function traverse(node, parentId, edgeLabel) {
+                const currentNodeId = nodeId++;
+
+                if (node.leaf) {
+                    // Лист – прямоугольник
+                    const dist = Object.entries(node.distribution)
+                        .map(([k, v]) => `${k}:${v}`)
+                        .join(', ');
+                    const idsStr = node.ids ? [...node.ids].sort((a, b) => a - b).join(',') : '';
+                    const label = `${targetAttribute}: ${node.leaf}\nЗаписей: ${node.total}\n${dist}\nID: ${idsStr}`;
+                    nodes.push({
+                        id: currentNodeId,
+                        label: label,
+                        shape: 'box',
+                        color: getLeafColor(node.leaf),
+                        font: { size: 14, multi: true }
+                    });
+                    if (parentId !== null) {
+                        edges.push({ from: parentId, to: currentNodeId, label: edgeLabel, arrows: 'to', font: { size: 16 } });
+                    }
+                    return;
+                }
+
+                // Узел-атрибут (не лист) – ромб
+                const dist = Object.entries(node.distribution)
+                    .map(([k, v]) => `${k}:${v}`)
+                    .join(', ');
+                const idsStr = node.ids ? [...node.ids].sort((a, b) => a - b).join(',') : '';
+                const label = `${node.node}\nЭнтропия: ${node.entropy.toFixed(3)}\nЗаписей: ${node.total}\n${dist}\nID: ${idsStr}`;
+                nodes.push({
+                    id: currentNodeId,
+                    label: label,
+                    shape: 'diamond',
+                    color: { background: '#eaf2f8', border: '#1e88e5' },
+                    font: { size: 14, multi: true }
+                });
+                if (parentId !== null) {
+                    edges.push({ from: parentId, to: currentNodeId, label: edgeLabel, arrows: 'to', font: { size: 16 } });
+                }
+
+                // Рекурсивно обрабатываем детей (без альтернатив)
+                const sortedChildren = Object.entries(node.children).sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }));
+                for (const [value, child] of sortedChildren) {
+                    traverse(child, currentNodeId, value);
+                }
+            }
+
+            traverse(tree, null, null);
+
+            new vis.Network(document.getElementById('tree-viz'), { nodes, edges }, {
+                layout: {
+                    hierarchical: {
+                        direction: 'UD',
+                        sortMethod: 'directed',
+                        levelSeparation: 400,
+                        nodeSpacing: 250,
+                        treeSpacing: 200
+                    }
+                },
+                physics: { enabled: false },
+                edges: {
+                    smooth: true,
+                    width: 2,
+                    font: { size: 18, color: '#495057', face: 'Arial', bold: true },
+                    arrows: { to: { enabled: true, scaleFactor: 1 } }
+                }
+            });
+        }
+
+        function predictWithTreePath(tree, record, pathSoFar=[]) {
+            if (!tree) return { leaf: null, path: pathSoFar };
+            if (tree.leaf) return { leaf: tree.leaf, path: pathSoFar };
+            const val = record[tree.node];
+            const child = val != null && tree.children && tree.children[val];
+            const step = `${tree.node}=${val != null ? val : '?'}`;
+            if (!child) {
+                const majority = tree.distribution ? Object.entries(tree.distribution).reduce((a,b)=>a[1]>b[1]?a:b)[0] : null;
+                return { leaf: majority, path: pathSoFar.concat(step) };
+            }
+            return predictWithTreePath(child, record, pathSoFar.concat(step));
+        }
+
+        // Рекурсивно собирает все возможные пути до листьев для заданной частичной записи
+        // Если атрибут неизвестен, обходит все дочерние ветки
+        function getAllLeavesWithPaths(node, record, currentPath) {
+            if (!node) return [];
+            if (node.leaf) {
+                return [{ leaf: node.leaf, path: [...currentPath] }];
+            }
+            const attr = node.node;
+            const value = record[attr];
+            if (value !== undefined && value !== null && node.children[value]) {
+                // значение известно – идём по конкретной ветке
+                return getAllLeavesWithPaths(node.children[value], record, [...currentPath, `${attr} = ${value}`]);
+            } else {
+                // значение неизвестно – собираем все листья со всех веток
+                let results = [];
+                for (const [val, child] of Object.entries(node.children)) {
+                    results.push(...getAllLeavesWithPaths(child, record, [...currentPath, `${attr} = ${val}`]));
+                }
+                return results;
+            }
+        }
+
+        function buildProjectionMatrix(tree, data, attrX, attrY) {
+            const valuesX = [...new Set(data.map(r => r[attrX]).filter(v => v && v !== ''))].sort();
+            const valuesY = [...new Set(data.map(r => r[attrY]).filter(v => v && v !== ''))].sort();
+            const cells = {};
+            const colors = [
+                { bg: '#fdebd0', border: '#e67e22' }, { bg: '#d1f2eb', border: '#1abc9c' },
+                { bg: '#e8f4fd', border: '#3498db' }, { bg: '#f4e6ff', border: '#9b59b6' },
+                { bg: '#ffe6e6', border: '#e74c3c' }, { bg: '#fef9e7', border: '#f1c40f' }
+            ];
+            const colorMap = {};
+
+            // Кешируем результат predictWithTreePath для каждой записи
+            const recordCache = new Map();
+            for (const record of data) {
+                const { leaf, path } = predictWithTreePath(tree, record);
+                recordCache.set(record, { leaf, path });
+            }
+
+            valuesY.forEach(vy => {
+                valuesX.forEach(vx => {
+                    // Группируем по листу (классу)
+                    const groupByLeaf = new Map(); // leaf -> { leaf, condition, ids, pathExample }
+
+                    // Находим все записи, где значения по осям совпадают с текущей парой
+                    const matchingRecords = data.filter(r => r[attrX] === vx && r[attrY] === vy);
+                    for (const rec of matchingRecords) {
+                        const { leaf, path } = recordCache.get(rec);
+                        if (!groupByLeaf.has(leaf)) {
+                            // Вычисляем "решающее условие" – последний атрибут в пути, не относящийся к X или Y
+                            let conditionText = 'всегда';
+                            for (let i = path.length - 1; i >= 0; i--) {
+                                const attr = path[i].split(' =')[0];
+                                if (attr !== attrX && attr !== attrY) {
+                                    conditionText = path[i];
+                                    break;
+                                }
+                            }
+                            groupByLeaf.set(leaf, {
+                                leaf: leaf,
+                                condition: conditionText,
+                                ids: [],
+                                pathExample: path
+                            });
+                        }
+                        groupByLeaf.get(leaf).ids.push(rec.id);
+                    }
+
+                    // Преобразуем Map в массив подъячеек
+                    const subCells = [];
+                    for (const [leaf, info] of groupByLeaf.entries()) {
+                        info.ids.sort((a, b) => a - b);
+                        subCells.push(info);
+                        if (!colorMap[leaf]) {
+                            colorMap[leaf] = colors[Object.keys(colorMap).length % colors.length];
+                        }
+                    }
+                    cells[vy + '|' + vx] = subCells;
+                });
+            });
+
+            return { valuesX, valuesY, cells, colorMap };
+        }   
+
+        function renderProjectionMatrix() {
+            if(!lastBuiltTree || !lastBuiltData) return;
+            let attrX = document.getElementById('axisXSelect').value;
+            let attrY = document.getElementById('axisYSelect').value;
+            const attrs = getAttributesFromTable();
+            if(attrX===attrY && attrs.length>=2){
+                if(document.getElementById('axisXSelect').value===attrX) document.getElementById('axisYSelect').value=attrs.find(a=>a!==attrX);
+                else document.getElementById('axisXSelect').value=attrs.find(a=>a!==attrY);
+                attrX=document.getElementById('axisXSelect').value;
+                attrY=document.getElementById('axisYSelect').value;
+            }
+            const {valuesX, valuesY, cells, colorMap} = buildProjectionMatrix(lastBuiltTree, lastBuiltData, attrX, attrY);
+            const table = document.getElementById('projection-matrix');
+            table.innerHTML='';
+            const thead = document.createElement('thead');
+            let tr = document.createElement('tr');
+            tr.appendChild(document.createElement('th'));
+            valuesX.forEach(vx=>{ let th=document.createElement('th'); th.textContent=vx; tr.appendChild(th); });
+            thead.appendChild(tr);
+            table.appendChild(thead);
+            const tbody = document.createElement('tbody');
+            valuesY.forEach(vy=>{
+                tr = document.createElement('tr');
+                let th=document.createElement('th'); th.className='axis-y'; th.textContent=vy; tr.appendChild(th);
+                valuesX.forEach(vx=>{
+                    const key = vy + '|' + vx;
+                    const subCells = cells[key];
+                    const td = document.createElement('td');
+                    if (subCells && subCells.length > 0) {
+                        for (const sub of subCells) {
+                            const style = colorMap[sub.leaf];
+                            const block = document.createElement('div');
+                            block.style.backgroundColor = style.bg;
+                            block.style.border = `1px solid ${style.border}`;
+                            block.style.borderRadius = '6px';
+                            block.style.margin = '4px';
+                            block.style.padding = '6px 8px';
+                            block.style.fontSize = '0.85rem';
+                            const idsText = sub.ids.length ? ` (id: ${sub.ids.join(', ')})` : '';
+                            block.innerHTML = `<strong>${sub.leaf}</strong>${idsText}<br><span style="font-size:0.75rem; color:#2c3e50;">${sub.condition}</span>`;
+                            td.appendChild(block);
+                        }
+                    } else {
+                        td.textContent = '—';
+                        td.className = 'cell-empty';
+                    }
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            }
+        );
+            table.appendChild(tbody);
+            const legend=document.getElementById('projection-legend');
+            legend.innerHTML='';
+            Object.entries(colorMap).forEach(([cls,style])=>{
+                let span=document.createElement('span');
+                span.style.background=style.bg; span.style.borderColor=style.border; span.style.borderWidth='1px'; span.style.borderStyle='solid';
+                span.textContent=cls; legend.appendChild(span);
+            });
+        }
+
+        function fillAxisSelects() {
+            const attrs = getAttributesFromTable();
+            const selX = document.getElementById('axisXSelect');
+            const selY = document.getElementById('axisYSelect');
+            selX.innerHTML = attrs.map(a=>`<option value="${a}">${a}</option>`).join('');
+            selY.innerHTML = attrs.map(a=>`<option value="${a}">${a}</option>`).join('');
+            if(attrs.length>=2){ selX.value=attrs[0]; selY.value=attrs[1]; }
+        }
+
+        function collectDecisionRules(node, pathConditions) {
+            if(!node) return [];
+            if(node.leaf) return [{ conditions: pathConditions, result: node.leaf }];
+            let rules=[];
+            for(const [val, child] of Object.entries(node.children))
+                rules.push(...collectDecisionRules(child, pathConditions.concat(`${node.node} = ${val}`)));
+            return rules;
+        }
+
+        function optimizeDecisionPaths(pathArrays) {
+            const nonEmpty=pathArrays.filter(p=>p.length);
+            const hasEmpty=pathArrays.some(p=>p.length===0);
+            if(pathArrays.length===0 || nonEmpty.length===0) return 'все';
+            if(pathArrays.length===1) return nonEmpty[0].join(' && ');
+            if(hasEmpty && nonEmpty.length===1) return 'все || ('+nonEmpty[0].join(' && ')+')';
+            if(hasEmpty) return 'все || ('+optimizeDecisionPaths(nonEmpty)+')';
+            let lcp=[], first=nonEmpty[0];
+            for(let i=0;i<first.length;i++){
+                if(nonEmpty.every(p=>p[i]===first[i])) lcp.push(first[i]);
+                else break;
+            }
+            if(lcp.length===0) return '('+nonEmpty.map(p=>p.join(' && ')).join(') || (')+')';
+            const suffixes=nonEmpty.map(p=>p.slice(lcp.length));
+            const suffixPart=suffixes.map(s=>s.join(' && ')).join(') || (');
+            return lcp.join(' && ')+' && (('+suffixPart+'))';
+        }
+
+        function processAndDisplayResults(tree) {
+            const rules = collectDecisionRules(tree, []);
+            const byResult = {};
+            rules.forEach(r=>{ if(!byResult[r.result]) byResult[r.result]=[]; byResult[r.result].push(r.conditions); });
+            const formulasDiv = document.getElementById('decision-formulas-list');
+            formulasDiv.innerHTML = '';
+            Object.keys(byResult).sort().forEach(res=>{
+                const formula = optimizeDecisionPaths(byResult[res]) + ' = ' + res;
+                const block = document.createElement('div'); block.className='decision-formula-block';
+                block.innerHTML = formula.replace(/=(.*)$/, '= <span class="formula-value">$1</span>');
+                formulasDiv.appendChild(block);
+            });
+            const resContainer = document.querySelector('#resultsContainer .results-grid');
+            resContainer.innerHTML = '';
+            const counts = {};
+            const collectIds = (n)=>{
+                if(n.leaf){ if(!counts[n.leaf]) counts[n.leaf]=[]; if(n.ids) counts[n.leaf].push(...n.ids); }
+                else if(n.children) Object.values(n.children).forEach(collectIds);
+            };
+            collectIds(tree);
+            Object.entries(counts).forEach(([cls,ids])=>{
+                const div = document.createElement('div');
+                div.innerHTML = `<h3>${targetAttribute}: ${cls}</h3><p>${[...new Set(ids)].sort((a,b)=>a-b).join(', ') || 'нет'}</p>`;
+                resContainer.appendChild(div);
+            });
+            document.getElementById('resultsTitle').textContent = `Итоги классификации по атрибуту "${targetAttribute}"`;
+        }
+
+        window.onload = () => {
+            const logicalDiv = document.getElementById('formulaLogical');
+            const ifElseDiv = document.getElementById('formulaIfElse');
+            const btnLog = document.getElementById('formulaLogBtn');
+            const btnIf = document.getElementById('formulaIfBtn');
+
+            if (btnLog && btnIf) {
+                btnLog.addEventListener('click', () => {
+                    logicalDiv.style.display = 'block';
+                    ifElseDiv.style.display = 'none';
+                    btnLog.classList.add('btn-primary');
+                    btnLog.classList.remove('btn-secondary');
+                    btnIf.classList.add('btn-secondary');
+                    btnIf.classList.remove('btn-primary');
+                });
+                btnIf.addEventListener('click', () => {
+                    logicalDiv.style.display = 'none';
+                    ifElseDiv.style.display = 'block';
+                    btnIf.classList.add('btn-primary');
+                    btnIf.classList.remove('btn-secondary');
+                    btnLog.classList.add('btn-secondary');
+                    btnLog.classList.remove('btn-primary');
+                });
+            }
+            handleReset();
+            document.getElementById('startButton').addEventListener('click', runFullProcess);
+            document.getElementById('addRowButton').addEventListener('click', handleAddRow);
+            document.getElementById('addColumnButton').addEventListener('click', handleAddColumn);
+            document.getElementById('randomTableButton').addEventListener('click', generateRandomData);
+            document.getElementById('resetButton').addEventListener('click', handleReset);
+            document.getElementById('axisXSelect').addEventListener('change', renderProjectionMatrix);
+            document.getElementById('axisYSelect').addEventListener('change', renderProjectionMatrix);
+           
+        };
+    </script>
+</body>
+</html>
