@@ -558,8 +558,8 @@
 
             // Цветовая схема для листьев (по классам)
             const leafColors = [
-                { background: '#fdebd0', border: '#e67e22' }, // оранжевый
-                { background: '#d1f2eb', border: '#1abc9c' }, // зелёный
+                { background: '#d4edda', border: '#28a745' },  // зелёный
+                { background: '#f8d7da', border: '#dc3545' }, // красный
                 { background: '#e8f4fd', border: '#3498db' }, // синий
                 { background: '#f4e6ff', border: '#9b59b6' }, // фиолетовый
                 { background: '#ffe6e6', border: '#e74c3c' }, // красный
@@ -589,7 +589,7 @@
                         label: label,
                         shape: 'box',
                         color: getLeafColor(node.leaf),
-                        font: { size: 14, multi: true }
+                        font: { size: 18, multi: true }
                     });
                     if (parentId !== null) {
                         edges.push({ from: parentId, to: currentNodeId, label: edgeLabel, arrows: 'to', font: { size: 16 } });
@@ -602,13 +602,13 @@
                     .map(([k, v]) => `${k}:${v}`)
                     .join(', ');
                 const idsStr = node.ids ? [...node.ids].sort((a, b) => a - b).join(',') : '';
-                const label = `${node.node}\nЭнтропия: ${node.entropy.toFixed(3)}\nЗаписей: ${node.total}\n${dist}\nID: ${idsStr}`;
+                const label = `${node.node}`; /*\nЭнтропия: ${node.entropy.toFixed(3)}\nЗаписей: ${node.total}\n${dist}\nID: ${idsStr}*/
                 nodes.push({
                     id: currentNodeId,
                     label: label,
                     shape: 'diamond',
                     color: { background: '#eaf2f8', border: '#1e88e5' },
-                    font: { size: 14, multi: true }
+                    font: { size: 18, multi: true }
                 });
                 if (parentId !== null) {
                     edges.push({ from: parentId, to: currentNodeId, label: edgeLabel, arrows: 'to', font: { size: 16 } });
@@ -628,9 +628,9 @@
                     hierarchical: {
                         direction: 'UD',
                         sortMethod: 'directed',
-                        levelSeparation: 400,
+                        levelSeparation: 250,
                         nodeSpacing: 250,
-                        treeSpacing: 200
+                        treeSpacing: 50
                     }
                 },
                 physics: { enabled: false },
@@ -666,10 +666,8 @@
             const attr = node.node;
             const value = record[attr];
             if (value !== undefined && value !== null && node.children[value]) {
-                // значение известно – идём по конкретной ветке
                 return getAllLeavesWithPaths(node.children[value], record, [...currentPath, `${attr} = ${value}`]);
             } else {
-                // значение неизвестно – собираем все листья со всех веток
                 let results = [];
                 for (const [val, child] of Object.entries(node.children)) {
                     results.push(...getAllLeavesWithPaths(child, record, [...currentPath, `${attr} = ${val}`]));
@@ -682,64 +680,47 @@
             const valuesX = [...new Set(data.map(r => r[attrX]).filter(v => v && v !== ''))].sort();
             const valuesY = [...new Set(data.map(r => r[attrY]).filter(v => v && v !== ''))].sort();
             const cells = {};
-            const colors = [
-                { bg: '#fdebd0', border: '#e67e22' }, { bg: '#d1f2eb', border: '#1abc9c' },
-                { bg: '#e8f4fd', border: '#3498db' }, { bg: '#f4e6ff', border: '#9b59b6' },
-                { bg: '#ffe6e6', border: '#e74c3c' }, { bg: '#fef9e7', border: '#f1c40f' }
+            // Фиксированные цвета для "да" и "нет"
+            const fixedColors = {
+                "да": { bg: '#d4edda', border: '#28a745' },  // зелёный
+                "нет": { bg: '#f8d7da', border: '#dc3545' } // красный
+            };
+            const fallbackColors = [
+                { bg: '#e8f4fd', border: '#3498db' }, // синий
+                { bg: '#f4e6ff', border: '#9b59b6' }, // фиолетовый
+                { bg: '#fef9e7', border: '#f1c40f' }  // жёлтый
             ];
             const colorMap = {};
 
-            // Кешируем результат predictWithTreePath для каждой записи
-            const recordCache = new Map();
-            for (const record of data) {
-                const { leaf, path } = predictWithTreePath(tree, record);
-                recordCache.set(record, { leaf, path });
-            }
-
-            valuesY.forEach(vy => {
-                valuesX.forEach(vx => {
-                    // Группируем по листу (классу)
-                    const groupByLeaf = new Map(); // leaf -> { leaf, condition, ids, pathExample }
-
-                    // Находим все записи, где значения по осям совпадают с текущей парой
-                    const matchingRecords = data.filter(r => r[attrX] === vx && r[attrY] === vy);
-                    for (const rec of matchingRecords) {
-                        const { leaf, path } = recordCache.get(rec);
-                        if (!groupByLeaf.has(leaf)) {
-                            // Вычисляем "решающее условие" – последний атрибут в пути, не относящийся к X или Y
-                            let conditionText = 'всегда';
-                            for (let i = path.length - 1; i >= 0; i--) {
-                                const attr = path[i].split(' =')[0];
-                                if (attr !== attrX && attr !== attrY) {
-                                    conditionText = path[i];
-                                    break;
-                                }
-                            }
-                            groupByLeaf.set(leaf, {
-                                leaf: leaf,
-                                condition: conditionText,
-                                ids: [],
-                                pathExample: path
-                            });
-                        }
-                        groupByLeaf.get(leaf).ids.push(rec.id);
-                    }
-
-                    // Преобразуем Map в массив подъячеек
-                    const subCells = [];
-                    for (const [leaf, info] of groupByLeaf.entries()) {
-                        info.ids.sort((a, b) => a - b);
-                        subCells.push(info);
+            for (const vy of valuesY) {
+                for (const vx of valuesX) {
+                    const partialRecord = { [attrX]: vx, [attrY]: vy };
+                    const allPaths = getAllLeavesWithPaths(tree, partialRecord, []);
+                    const cards = [];
+                    for (const { leaf, path } of allPaths) {
+                        const relevantSteps = path.filter(step => {
+                            const attr = step.split(' =')[0];
+                            return attr !== attrX && attr !== attrY;
+                        });
+                        let condition = relevantSteps.join(' ∧ ');
+                        if (condition === '') condition = 'всегда';
+                        cards.push({ leaf, condition });
+                        // Назначаем цвет: для "да" и "нет" — фиксированный, для остальных — из резерва
                         if (!colorMap[leaf]) {
-                            colorMap[leaf] = colors[Object.keys(colorMap).length % colors.length];
+                            if (leaf === "да") {
+                                colorMap[leaf] = fixedColors["да"];
+                            } else if (leaf === "нет") {
+                                colorMap[leaf] = fixedColors["нет"];
+                            } else {
+                                colorMap[leaf] = fallbackColors[Object.keys(colorMap).length % fallbackColors.length];
+                            }
                         }
                     }
-                    cells[vy + '|' + vx] = subCells;
-                });
-            });
-
+                    cells[vy + '|' + vx] = cards;
+                }
+            }
             return { valuesX, valuesY, cells, colorMap };
-        }   
+        }
 
         function renderProjectionMatrix() {
             if(!lastBuiltTree || !lastBuiltData) return;
@@ -779,8 +760,8 @@
                             block.style.margin = '4px';
                             block.style.padding = '6px 8px';
                             block.style.fontSize = '0.85rem';
-                            const idsText = sub.ids.length ? ` (id: ${sub.ids.join(', ')})` : '';
-                            block.innerHTML = `<strong>${sub.leaf}</strong>${idsText}<br><span style="font-size:0.75rem; color:#2c3e50;">${sub.condition}</span>`;
+                            // Здесь можно добавить количество путей или просто условие
+                            block.innerHTML = `<strong>${sub.leaf}</strong><br><span style="font-size:0.75rem;">${sub.condition}</span>`;
                             td.appendChild(block);
                         }
                     } else {
