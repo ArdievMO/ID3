@@ -76,6 +76,7 @@
         .formula-block p { margin: 8px 0 0 0; font-size: 0.9rem; color: #5a6268; line-height: 1.5; }
         .formula-result { border-left-color: #28a745; background: #f0fff4; }
         .formula-result .formula-display { background: #e8f5e9; }
+        .cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; align-items: stretch; }
     </style>
 </head>
 <body>
@@ -678,121 +679,215 @@
         }
 
         function buildProjectionMatrix(tree, data, attrX, attrY) {
-    const valuesX = [...new Set(data.map(r => r[attrX]).filter(v => v && v !== ''))].sort();
-    const valuesY = [...new Set(data.map(r => r[attrY]).filter(v => v && v !== ''))].sort();
-    const cells = {}; // cells[vy+'|'+vx] = массив карточек {leaf, condition, ids}
+            const valuesX = [...new Set(data.map(r => r[attrX]).filter(v => v && v !== ''))].sort();
+            const valuesY = [...new Set(data.map(r => r[attrY]).filter(v => v && v !== ''))].sort();
+            const cells = {};
 
-    const fixedColors = {
-        "ДА": { bg: '#d4edda', border: '#28a745' },
-        "НЕТ": { bg: '#f8d7da', border: '#dc3545' }
-    };
-    const fallbackColors = [
-        { bg: '#e8f4fd', border: '#3498db' },
-        { bg: '#f4e6ff', border: '#9b59b6' },
-        { bg: '#fef9e7', border: '#f1c40f' }
-    ];
-    const colorMap = {};
+            const fixedColors = {
+                "ДА": { bg: '#d4edda', border: '#28a745' },
+                "НЕТ": { bg: '#f8d7da', border: '#dc3545' }
+            };
+            const fallbackColors = [
+                { bg: '#e8f4fd', border: '#3498db' },
+                { bg: '#f4e6ff', border: '#9b59b6' },
+                { bg: '#fef9e7', border: '#f1c40f' }
+            ];
+            const colorMap = {};
 
-    for (const vy of valuesY) {
-        for (const vx of valuesX) {
-            // Группировка: ключ = leaf + '|' + condition
-            const groups = new Map(); // key -> { leaf, condition, ids }
+            for (const vy of valuesY) {
+                for (const vx of valuesX) {
+                    const groups = new Map(); // key: leaf + '|' + condition + '|' + secondaryValue
+                    let secondaryAttr = null;
 
-            for (const record of data) {
-                if (record[attrX] === vx && record[attrY] === vy) {
-                    const { leaf, path } = predictWithTreePath(tree, record);
-                    // Убираем из пути условия, относящиеся к осям
-                    const relevantSteps = path.filter(step => {
-                        const attr = step.split(' =')[0];
-                        return attr !== attrX && attr !== attrY;
-                    });
-                    let condition = relevantSteps.join(' ∧ ');
-                    if (condition === '') condition = 'всегда';
-                    const key = leaf + '|' + condition;
-                    if (!groups.has(key)) {
-                        groups.set(key, { leaf, condition, ids: [] });
+                    for (const record of data) {
+                        if (record[attrX] === vx && record[attrY] === vy) {
+                            const { leaf, path } = predictWithTreePath(tree, record);
+                            let secondaryValue = null;
+                            let remainingSteps = [...path];
+                            for (let i = 0; i < path.length; i++) {
+                                const stepAttr = path[i].split(' =')[0];
+                                if (stepAttr !== attrX && stepAttr !== attrY) {
+                                    if (secondaryAttr === null) secondaryAttr = stepAttr;
+                                    secondaryValue = path[i].split(' = ')[1] || path[i].split(' =')[1];
+                                    remainingSteps = path.slice(i + 1);
+                                    break;
+                                }
+                            }
+                            const relevantSteps = remainingSteps.filter(step => {
+                                const a = step.split(' =')[0];
+                                return a !== attrX && a !== attrY && a !== secondaryAttr;
+                            });
+                            let condition = relevantSteps.join(' ∧ ');
+                            if (condition === '') condition = 'всегда';
+                            const groupKey = leaf + '|' + condition + '|' + (secondaryValue || '');
+                            if (!groups.has(groupKey)) {
+                                groups.set(groupKey, { leaf, condition, secondaryValue, ids: [] });
+                            }
+                            groups.get(groupKey).ids.push(record.id);
+                        }
                     }
-                    groups.get(key).ids.push(record.id);
+
+                    const secondaryGroups = new Map();
+                    for (const group of groups.values()) {
+                        const val = group.secondaryValue || '—';
+                        if (!secondaryGroups.has(val)) secondaryGroups.set(val, []);
+                        group.ids.sort((a, b) => a - b);
+                        secondaryGroups.get(val).push({ leaf: group.leaf, condition: group.condition, ids: group.ids });
+                    }
+
+                    for (const cards of secondaryGroups.values()) {
+                        for (const card of cards) {
+                            if (!colorMap[card.leaf]) {
+                                if (card.leaf === "ДА") colorMap[card.leaf] = fixedColors["ДА"];
+                                else if (card.leaf === "НЕТ") colorMap[card.leaf] = fixedColors["НЕТ"];
+                                else colorMap[card.leaf] = fallbackColors[Object.keys(colorMap).length % fallbackColors.length];
+                            }
+                        }
+                    }
+
+                    cells[vy + '|' + vx] = { secondaryAttr, groups: secondaryGroups };
                 }
             }
-
-            // Преобразуем группы в массив карточек
-            const cards = Array.from(groups.values()).map(card => {
-                card.ids.sort((a,b) => a-b);
-                // Назначаем цвет, если ещё нет
-                if (!colorMap[card.leaf]) {
-                    if (card.leaf === "ДА") colorMap[card.leaf] = fixedColors["ДА"];
-                    else if (card.leaf === "НЕТ") colorMap[card.leaf] = fixedColors["НЕТ"];
-                    else colorMap[card.leaf] = fallbackColors[Object.keys(colorMap).length % fallbackColors.length];
-                }
-                return card;
-            });
-            cells[vy + '|' + vx] = cards;
+            return { valuesX, valuesY, cells, colorMap };
         }
-    }
-    return { valuesX, valuesY, cells, colorMap };
-}
+
+
 
         function renderProjectionMatrix() {
-            if(!lastBuiltTree || !lastBuiltData) return;
+            if (!lastBuiltTree || !lastBuiltData) return;
+
             let attrX = document.getElementById('axisXSelect').value;
             let attrY = document.getElementById('axisYSelect').value;
             const attrs = getAttributesFromTable();
-            if(attrX===attrY && attrs.length>=2){
-                if(document.getElementById('axisXSelect').value===attrX) document.getElementById('axisYSelect').value=attrs.find(a=>a!==attrX);
-                else document.getElementById('axisXSelect').value=attrs.find(a=>a!==attrY);
-                attrX=document.getElementById('axisXSelect').value;
-                attrY=document.getElementById('axisYSelect').value;
+
+            if (attrX === attrY && attrs.length >= 2) {
+                if (document.getElementById('axisXSelect').value === attrX) {
+                    document.getElementById('axisYSelect').value = attrs.find(a => a !== attrX);
+                } else {
+                    document.getElementById('axisXSelect').value = attrs.find(a => a !== attrY);
+                }
+                attrX = document.getElementById('axisXSelect').value;
+                attrY = document.getElementById('axisYSelect').value;
             }
-            const {valuesX, valuesY, cells, colorMap} = buildProjectionMatrix(lastBuiltTree, lastBuiltData, attrX, attrY);
+
+            const { valuesX, valuesY, cells, colorMap } = buildProjectionMatrix(lastBuiltTree, lastBuiltData, attrX, attrY);
             const table = document.getElementById('projection-matrix');
-            table.innerHTML='';
+            table.innerHTML = '';
+
+            // Заголовок (ось X)
             const thead = document.createElement('thead');
             let tr = document.createElement('tr');
-            tr.appendChild(document.createElement('th'));
-            valuesX.forEach(vx=>{ let th=document.createElement('th'); th.textContent=vx; tr.appendChild(th); });
+            tr.appendChild(document.createElement('th')); // пустая ячейка
+            valuesX.forEach(vx => {
+                const th = document.createElement('th');
+                th.textContent = vx;
+                tr.appendChild(th);
+            });
             thead.appendChild(tr);
             table.appendChild(thead);
+
+            // Тело (ось Y)
             const tbody = document.createElement('tbody');
-            valuesY.forEach(vy=>{
+            for (const vy of valuesY) {
                 tr = document.createElement('tr');
-                let th=document.createElement('th'); th.className='axis-y'; th.textContent=vy; tr.appendChild(th);
-                valuesX.forEach(vx=>{
+                const th = document.createElement('th');
+                th.className = 'axis-y';
+                th.textContent = vy;
+                tr.appendChild(th);
+
+                for (const vx of valuesX) {
                     const key = vy + '|' + vx;
-                    const subCells = cells[key];
+                    const cellData = cells[key];
                     const td = document.createElement('td');
-                    if (subCells && subCells.length > 0) {
-                        for (const sub of subCells) {
-                            const style = colorMap[sub.leaf];
-                            const block = document.createElement('div');
-                            block.style.backgroundColor = style.bg;
-                            block.style.border = `1px solid ${style.border}`;
-                            block.style.borderRadius = '6px';
-                            block.style.margin = '4px';
-                            block.style.padding = '6px 8px';
-                            block.style.fontSize = '0.85rem';
-                            // Здесь можно добавить количество путей или просто условие
-                            block.innerHTML = `<strong>${sub.leaf}</strong> (ID: ${sub.ids.join(', ')})<br><span style="font-size:0.75rem;">${sub.condition}</span><br><span style="font-size:0.7rem; color:#495057;"></span>`;
-                            td.appendChild(block);
+
+                    if (cellData && cellData.groups && cellData.groups.size > 0) {
+                        const { secondaryAttr, groups } = cellData;
+
+                        if (secondaryAttr && groups.size > 1) {
+                            // Внутренняя таблица для разных значений вторичного атрибута
+                            const innerTable = document.createElement('table');
+                            innerTable.style.width = '100%';
+                            innerTable.style.borderCollapse = 'collapse';
+
+                            for (const [secVal, cards] of groups.entries()) {
+                                const row = document.createElement('tr');
+
+                                // Заголовок строки: вторичный атрибут = значение
+                                const thSec = document.createElement('th');
+                                thSec.textContent = `${secondaryAttr} = ${secVal}`;
+                                thSec.style.backgroundColor = '#f1f3f5';
+                                thSec.style.border = '1px solid #dee2e6';
+                                thSec.style.padding = '4px';
+                                thSec.style.fontWeight = 'normal';
+                                thSec.style.verticalAlign = 'top';
+                                row.appendChild(thSec);
+
+                                // Ячейка с карточками (сетка)
+                                const tdCards = document.createElement('td');
+                                tdCards.style.border = '1px solid #dee2e6';
+                                tdCards.style.padding = '4px';
+
+                                const gridContainer = document.createElement('div');
+                                gridContainer.className = 'cards-grid';
+                                for (const card of cards) {
+                                    const style = colorMap[card.leaf];
+                                    const block = document.createElement('div');
+                                    block.style.backgroundColor = style.bg;
+                                    block.style.border = `1px solid ${style.border}`;
+                                    block.style.borderRadius = '4px';
+                                    block.style.padding = '4px';
+                                    const idsStr = card.ids.length ? `ID: ${card.ids.join(', ')}` : 'ID: —';
+                                    block.innerHTML = `<strong>${card.leaf}</strong><br><span style="font-size:0.7rem;">${card.condition}</span><br><span style="font-size:0.65rem;">${idsStr}</span>`;
+                                    gridContainer.appendChild(block);
+                                }
+                                tdCards.appendChild(gridContainer);
+                                row.appendChild(tdCards);
+                                innerTable.appendChild(row);
+                            }
+                            td.appendChild(innerTable);
+                        } else {
+                            // Простой набор карточек (без вторичного атрибута)
+                            const gridContainer = document.createElement('div');
+                            gridContainer.className = 'cards-grid';
+                            for (const cards of groups.values()) {
+                                for (const card of cards) {
+                                    const style = colorMap[card.leaf];
+                                    const block = document.createElement('div');
+                                    block.style.backgroundColor = style.bg;
+                                    block.style.border = `1px solid ${style.border}`;
+                                    block.style.borderRadius = '6px';
+                                    block.style.padding = '6px 8px';
+                                    const idsStr = card.ids.length ? `ID: ${card.ids.join(', ')}` : 'ID: —';
+                                    block.innerHTML = `<strong>${card.leaf}</strong><br><span style="font-size:0.75rem;">${card.condition}</span><br><span style="font-size:0.7rem;">${idsStr}</span>`;
+                                    gridContainer.appendChild(block);
+                                }
+                            }
+                            td.appendChild(gridContainer);
                         }
                     } else {
                         td.textContent = '—';
                         td.className = 'cell-empty';
                     }
                     tr.appendChild(td);
-                });
+                }
                 tbody.appendChild(tr);
             }
-        );
             table.appendChild(tbody);
-            const legend=document.getElementById('projection-legend');
-            legend.innerHTML='';
-            Object.entries(colorMap).forEach(([cls,style])=>{
-                let span=document.createElement('span');
-                span.style.background=style.bg; span.style.borderColor=style.border; span.style.borderWidth='1px'; span.style.borderStyle='solid';
-                span.textContent=cls; legend.appendChild(span);
-            });
+
+            // Легенда
+            const legend = document.getElementById('projection-legend');
+            legend.innerHTML = '';
+            for (const [cls, style] of Object.entries(colorMap)) {
+                const span = document.createElement('span');
+                span.style.background = style.bg;
+                span.style.borderColor = style.border;
+                span.style.borderWidth = '1px';
+                span.style.borderStyle = 'solid';
+                span.textContent = cls;
+                legend.appendChild(span);
+            }
         }
+
 
         function fillAxisSelects() {
             const attrs = getAttributesFromTable();
