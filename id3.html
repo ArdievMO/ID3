@@ -404,11 +404,9 @@
             const data = lastBuiltData;
             if (!data || !currentRowAttrs.length || !currentColAttrs.length) return;
 
-            // Все возможные значения для строк и столбцов
             const rowValueSets = currentRowAttrs.map(attr => [...new Set(data.map(r => r[attr]).filter(v => v && v !== ''))].sort());
             const colValueSets = currentColAttrs.map(attr => [...new Set(data.map(r => r[attr]).filter(v => v && v !== ''))].sort());
 
-            // Декартовы произведения
             let colCombos = [[]];
             for (const set of colValueSets) {
                 const newCombos = [];
@@ -424,14 +422,17 @@
                 rowCombos = newCombos;
             }
 
-            function getClass(rowVals, colVals) {
+            // Функция возвращает { result, ids }
+            function getClassWithIds(rowVals, colVals) {
                 const filters = {};
                 currentRowAttrs.forEach((attr, i) => filters[attr] = rowVals[i]);
                 currentColAttrs.forEach((attr, i) => filters[attr] = colVals[i]);
                 const matching = data.filter(row => Object.entries(filters).every(([a, v]) => row[a] === v));
-                if (matching.length === 0) return '—';
+                if (matching.length === 0) return { result: '—', ids: [] };
                 const classes = [...new Set(matching.map(r => r[targetAttribute]))];
-                return classes.length === 1 ? classes[0] : '?';
+                const ids = matching.map(r => r.id).sort((a,b) => a-b);
+                if (classes.length === 1) return { result: classes[0], ids };
+                return { result: '?', ids }; // конфликт классов
             }
 
             const table = document.getElementById('decision-matrix');
@@ -441,31 +442,16 @@
             const colLevels = currentColAttrs.length;
 
             // ========== ЗАГОЛОВКИ СТОЛБЦОВ ==========
-            // ========== ЗАГОЛОВКИ СТОЛБЦОВ ==========
             const thead = document.createElement('thead');
-            const h_rowLevels = currentRowAttrs.length;
-            const h_colLevels = currentColAttrs.length;
-
-            for (let level = 0; level < h_colLevels; level++) {
+            for (let level = 0; level < colLevels; level++) {
                 const tr = document.createElement('tr');
-
                 if (level === 0) {
-                    // угловая ячейка: объединяет все уровни столбцов по вертикали
-                    // и все уровни строк по горизонтали
                     const corner = document.createElement('th');
-                    corner.rowSpan = h_colLevels;
-                    corner.colSpan = h_rowLevels;   // <- ключевое изменение
+                    corner.rowSpan = colLevels;
+                    corner.colSpan = rowLevels;
                     corner.textContent = 'Строки \\ Столбцы';
                     tr.appendChild(corner);
-                    // пустые ячейки больше не нужны, так как уголок уже занимает rowLevels столбцов
-                } else {
-                    // на уровнях >0 первая ячейка уже занята угловой (благодаря rowSpan),
-                    // но угловая ячейка занимает rowLevels столбцов, поэтому добавлять пустые ячейки не требуется.
-                    // Однако чтобы не нарушить структуру, можно ничего не добавлять,
-                    // так как colspan угловой ячейки действует на все строки thead.
                 }
-
-                // заполняем заголовки столбцов на текущем уровне
                 let prev = null, span = 0;
                 for (let i = 0; i < colCombos.length; i++) {
                     const val = colCombos[i][level];
@@ -492,7 +478,7 @@
             }
             table.appendChild(thead);
 
-            // ========== ТЕЛО ТАБЛИЦЫ (ЗАГОЛОВКИ СТРОК + ДАННЫЕ) ==========
+            // ========== ЗАГОЛОВКИ СТРОК И ТЕЛО ==========
             // Предрасчёт rowSpan для строк
             const rowSpanMap = Array(rowLevels).fill().map(() => []);
             for (let level = 0; level < rowLevels; level++) {
@@ -536,26 +522,45 @@
                             rowInBlock[level] = 0;
                             blockIdx[level]++;
                         }
-                        // Ячейка на этом уровне уже создана ранее – ничего не добавляем
+                        // ячейка уже создана – ничего не добавляем
                     }
                 }
 
-                // Ячейки данных
+                // Ячейки данных с ID
                 for (let ci = 0; ci < colCombos.length; ci++) {
+                    const { result, ids } = getClassWithIds(rowCombos[ri], colCombos[ci]);
                     const td = document.createElement('td');
-                    const result = getClass(rowCombos[ri], colCombos[ci]);
-                    td.textContent = result;
                     td.style.padding = '8px';
                     td.style.textAlign = 'center';
+                    td.style.verticalAlign = 'middle';
+                    
+                    // Основной результат
+                    const resultSpan = document.createElement('strong');
+                    resultSpan.textContent = result;
+                    td.appendChild(resultSpan);
+                    
+                    // ID записей (если есть)
+                    if (ids.length > 0 && result !== '—') {
+                        const idsDiv = document.createElement('div');
+                        idsDiv.style.fontSize = '0.7rem';
+                        idsDiv.style.marginTop = '4px';
+                        idsDiv.style.color = '#495057';
+                        idsDiv.textContent = `ID: ${ids.join(', ')}`;
+                        td.appendChild(idsDiv);
+                    }
+                    
+                    // Цвет фона по результату
                     if (result === 'ДА') td.style.backgroundColor = '#d4edda';
                     else if (result === 'НЕТ') td.style.backgroundColor = '#f8d7da';
+                    else if (result === '?') td.style.backgroundColor = '#fff3cd';
+                    
                     tr.appendChild(td);
                 }
                 tbody.appendChild(tr);
             }
             table.appendChild(tbody);
         }
-
+        
         function handleAddColumn() {
             const newColName = prompt("Введите название нового столбца (атрибута):");
             if (!newColName || newColName.trim() === '') return;
