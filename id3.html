@@ -441,35 +441,31 @@
             const colLevels = currentColAttrs.length;
 
             // ========== ЗАГОЛОВКИ СТОЛБЦОВ ==========
+            // ========== ЗАГОЛОВКИ СТОЛБЦОВ ==========
             const thead = document.createElement('thead');
+            const h_rowLevels = currentRowAttrs.length;
+            const h_colLevels = currentColAttrs.length;
 
-            for (let level = 0; level < colLevels; level++) {
+            for (let level = 0; level < h_colLevels; level++) {
                 const tr = document.createElement('tr');
 
-                // Добавляем пустые ячейки для выравнивания по левым заголовкам строк
                 if (level === 0) {
-                    // угловая ячейка, объединяет все уровни столбцов
+                    // угловая ячейка: объединяет все уровни столбцов по вертикали
+                    // и все уровни строк по горизонтали
                     const corner = document.createElement('th');
-                    corner.rowSpan = colLevels;
+                    corner.rowSpan = h_colLevels;
+                    corner.colSpan = h_rowLevels;   // <- ключевое изменение
                     corner.textContent = 'Строки \\ Столбцы';
                     tr.appendChild(corner);
-                    // добавляем пустые ячейки для остальных уровней строк (rowLevels - 1)
-                    for (let i = 1; i < rowLevels; i++) {
-                        const empty = document.createElement('th');
-                        empty.textContent = '';
-                        tr.appendChild(empty);
-                    }
+                    // пустые ячейки больше не нужны, так как уголок уже занимает rowLevels столбцов
                 } else {
-                    // на уровнях >0 первая колонка уже занята угловой ячейкой (rowSpan)
-                    // добавляем rowLevels - 1 пустых ячеек для выравнивания
-                    for (let i = 1; i < rowLevels; i++) {
-                        const empty = document.createElement('th');
-                        empty.textContent = '';
-                        tr.appendChild(empty);
-                    }
+                    // на уровнях >0 первая ячейка уже занята угловой (благодаря rowSpan),
+                    // но угловая ячейка занимает rowLevels столбцов, поэтому добавлять пустые ячейки не требуется.
+                    // Однако чтобы не нарушить структуру, можно ничего не добавлять,
+                    // так как colspan угловой ячейки действует на все строки thead.
                 }
 
-                // Заполняем заголовки столбцов на текущем уровне
+                // заполняем заголовки столбцов на текущем уровне
                 let prev = null, span = 0;
                 for (let i = 0; i < colCombos.length; i++) {
                     const val = colCombos[i][level];
