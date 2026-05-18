@@ -118,17 +118,21 @@
                 <div id="decision-formulas-list"></div>
             </div>
             <div class="results-grid"></div>
-            <div id="projection-section" style="display: none;">
-                <h3>Проекция решения на 2 параметра</h3>
-                <p style="margin-bottom: 16px; color: #5a6268;">Матрица показывает предсказание дерева для каждой комбинации значений выбранных атрибутов (по данным из таблицы).</p>
-                <div class="axis-controls">
-                    <label>Ось X: <select id="axisXSelect"></select></label>
-                    <label>Ось Y: <select id="axisYSelect"></select></label>
+            <div id="projection-section" style="display: none; margin-top: 30px; padding: 20px; background: #f8fafc; border-radius: 12px; border: 1px solid #dee2e6;">
+                <h3>Многоуровневая таблица решений</h3>
+                <div style="display: flex; gap: 40px; flex-wrap: wrap; margin-bottom: 20px;">
+                    <div>
+                        <h4>Уровни строк (вертикальные)</h4>
+                        <div id="row-selectors-container" style="display: flex; flex-direction: column; gap: 8px;"></div>
+                    </div>
+                    <div>
+                        <h4>Уровни столбцов (горизонтальные)</h4>
+                        <div id="col-selectors-container" style="display: flex; flex-direction: column; gap: 8px;"></div>
+                    </div>
                 </div>
-                <div id="projection-matrix-wrap">
-                    <table id="projection-matrix"></table>
+                <div id="matrix-table-container" style="overflow-x: auto;">
+                    <table id="decision-matrix" style="border-collapse: collapse; font-size: 0.9rem; border: 1px solid #ccc;"></table>
                 </div>
-                <div class="projection-legend" id="projection-legend"></div>
             </div>
             <div id="math-formula-wrap" style="margin-top: 25px; background: #f0f4f8; border-radius: 12px; border-left: 5px solid #1e88e5; display: none;">
                 <div style="padding: 12px 20px 0 20px;">
@@ -210,6 +214,8 @@
 
         let lastBuiltTree = null;
         let lastBuiltData = null;
+        let currentRowAttrs = [];
+        let currentColAttrs = [];
 
         function renderTableHeader(attributes) {
             const thead = document.querySelector('#dataTable thead');
@@ -312,16 +318,256 @@
             return formula;
         }
 
+        function buildSelectorsAndMatrix() {
+            const attributes = getAttributesFromTable();
+            if (!attributes.length || !lastBuiltData) {
+                document.getElementById('projection-section').style.display = 'none';
+                return;
+            }
+            // Разделяем атрибуты на две группы: для строк и для столбцов
+            const total = attributes.length;
+            const rowCount = Math.floor(total / 2);
+            const colCount = total - rowCount;
+            
+            // Инициализируем текущие выбранные атрибуты, если ещё не заданы
+            if (currentRowAttrs.length !== rowCount || currentColAttrs.length !== colCount) {
+                // начальное распределение: первые rowCount атрибутов – строки, остальные – столбцы
+                currentRowAttrs = attributes.slice(0, rowCount);
+                currentColAttrs = attributes.slice(rowCount);
+            }
+            
+            // Отрисовка селекторов
+            renderSelectors(attributes, 'row', currentRowAttrs, rowCount);
+            renderSelectors(attributes, 'col', currentColAttrs, colCount);
+            
+            // Построение таблицы
+            renderDecisionMatrix();
+        }
+
+        function renderSelectors(allAttrs, type, currentSelections, count) {
+            const container = document.getElementById(`${type}-selectors-container`);
+            if (!container) return;
+            container.innerHTML = '';
+            for (let i = 0; i < count; i++) {
+                const wrapper = document.createElement('div');
+                const label = document.createElement('label');
+                label.textContent = `Уровень ${i+1}`;
+                label.style.fontSize = '0.8rem';
+                label.style.fontWeight = 'bold';
+                const select = document.createElement('select');
+                select.setAttribute('data-type', type);
+                select.setAttribute('data-index', i);
+                // заполняем доступными атрибутами (исключая уже выбранные в других селекторах)
+                const used = [...currentRowAttrs, ...currentColAttrs];
+                const available = allAttrs.filter(a => !used.includes(a) || a === currentSelections[i]);
+                available.forEach(attr => {
+                    const opt = document.createElement('option');
+                    opt.value = attr;
+                    opt.textContent = attr;
+                    if (attr === currentSelections[i]) opt.selected = true;
+                    select.appendChild(opt);
+                });
+                select.addEventListener('change', (e) => onSelectorChange(type, i, e.target.value, allAttrs));
+                wrapper.appendChild(label);
+                wrapper.appendChild(select);
+                container.appendChild(wrapper);
+            }
+        }
+
+        function onSelectorChange(type, index, newValue, allAttrs) {
+            const isRow = (type === 'row');
+            const currentArray = isRow ? currentRowAttrs : currentColAttrs;
+            const otherArray = isRow ? currentColAttrs : currentRowAttrs;
+            const oldValue = currentArray[index];
+            if (newValue === oldValue) return;
+            // Проверка уникальности: новый атрибут не должен быть уже в currentArray или otherArray (кроме себя старого)
+            const alreadyInCurrent = currentArray.includes(newValue) && currentArray.indexOf(newValue) !== index;
+            const alreadyInOther = otherArray.includes(newValue);
+            if (alreadyInCurrent || alreadyInOther) {
+                // Находим первый свободный атрибут
+                const allUsed = [...currentArray, ...otherArray].filter((v, i, arr) => arr.indexOf(v) === i);
+                const free = allAttrs.find(a => !allUsed.includes(a));
+                if (free) {
+                    currentArray[index] = free;
+                } else {
+                    // нет свободных – возвращаем старый
+                    currentArray[index] = oldValue;
+                }
+            } else {
+                currentArray[index] = newValue;
+            }
+            // Перерисовываем селекторы и таблицу
+            buildSelectorsAndMatrix();
+        }
+
+        function renderDecisionMatrix() {
+            const data = lastBuiltData;
+            if (!data || !currentRowAttrs.length || !currentColAttrs.length) return;
+
+            // Все возможные значения для строк и столбцов
+            const rowValueSets = currentRowAttrs.map(attr => [...new Set(data.map(r => r[attr]).filter(v => v && v !== ''))].sort());
+            const colValueSets = currentColAttrs.map(attr => [...new Set(data.map(r => r[attr]).filter(v => v && v !== ''))].sort());
+
+            // Декартовы произведения
+            let colCombos = [[]];
+            for (const set of colValueSets) {
+                const newCombos = [];
+                for (const combo of colCombos)
+                    for (const val of set) newCombos.push([...combo, val]);
+                colCombos = newCombos;
+            }
+            let rowCombos = [[]];
+            for (const set of rowValueSets) {
+                const newCombos = [];
+                for (const combo of rowCombos)
+                    for (const val of set) newCombos.push([...combo, val]);
+                rowCombos = newCombos;
+            }
+
+            function getClass(rowVals, colVals) {
+                const filters = {};
+                currentRowAttrs.forEach((attr, i) => filters[attr] = rowVals[i]);
+                currentColAttrs.forEach((attr, i) => filters[attr] = colVals[i]);
+                const matching = data.filter(row => Object.entries(filters).every(([a, v]) => row[a] === v));
+                if (matching.length === 0) return '—';
+                const classes = [...new Set(matching.map(r => r[targetAttribute]))];
+                return classes.length === 1 ? classes[0] : '?';
+            }
+
+            const table = document.getElementById('decision-matrix');
+            table.innerHTML = '';
+
+            const rowLevels = currentRowAttrs.length;
+            const colLevels = currentColAttrs.length;
+
+            // ========== ЗАГОЛОВКИ СТОЛБЦОВ ==========
+            const thead = document.createElement('thead');
+
+            for (let level = 0; level < colLevels; level++) {
+                const tr = document.createElement('tr');
+
+                // Добавляем пустые ячейки для выравнивания по левым заголовкам строк
+                if (level === 0) {
+                    // угловая ячейка, объединяет все уровни столбцов
+                    const corner = document.createElement('th');
+                    corner.rowSpan = colLevels;
+                    corner.textContent = 'Строки \\ Столбцы';
+                    tr.appendChild(corner);
+                    // добавляем пустые ячейки для остальных уровней строк (rowLevels - 1)
+                    for (let i = 1; i < rowLevels; i++) {
+                        const empty = document.createElement('th');
+                        empty.textContent = '';
+                        tr.appendChild(empty);
+                    }
+                } else {
+                    // на уровнях >0 первая колонка уже занята угловой ячейкой (rowSpan)
+                    // добавляем rowLevels - 1 пустых ячеек для выравнивания
+                    for (let i = 1; i < rowLevels; i++) {
+                        const empty = document.createElement('th');
+                        empty.textContent = '';
+                        tr.appendChild(empty);
+                    }
+                }
+
+                // Заполняем заголовки столбцов на текущем уровне
+                let prev = null, span = 0;
+                for (let i = 0; i < colCombos.length; i++) {
+                    const val = colCombos[i][level];
+                    if (val === prev) {
+                        span++;
+                    } else {
+                        if (prev !== null) {
+                            const th = document.createElement('th');
+                            th.colSpan = span;
+                            th.textContent = `${currentColAttrs[level]}: ${prev}`;
+                            tr.appendChild(th);
+                        }
+                        prev = val;
+                        span = 1;
+                    }
+                }
+                if (prev !== null) {
+                    const th = document.createElement('th');
+                    th.colSpan = span;
+                    th.textContent = `${currentColAttrs[level]}: ${prev}`;
+                    tr.appendChild(th);
+                }
+                thead.appendChild(tr);
+            }
+            table.appendChild(thead);
+
+            // ========== ТЕЛО ТАБЛИЦЫ (ЗАГОЛОВКИ СТРОК + ДАННЫЕ) ==========
+            // Предрасчёт rowSpan для строк
+            const rowSpanMap = Array(rowLevels).fill().map(() => []);
+            for (let level = 0; level < rowLevels; level++) {
+                let prev = null, cnt = 0;
+                for (let i = 0; i < rowCombos.length; i++) {
+                    const val = rowCombos[i][level];
+                    if (val === prev) cnt++;
+                    else {
+                        if (prev !== null) rowSpanMap[level].push(cnt);
+                        prev = val;
+                        cnt = 1;
+                    }
+                }
+                if (prev !== null) rowSpanMap[level].push(cnt);
+            }
+
+            let blockIdx = Array(rowLevels).fill(0);
+            let rowInBlock = Array(rowLevels).fill(0);
+
+            const tbody = document.createElement('tbody');
+            for (let ri = 0; ri < rowCombos.length; ri++) {
+                const tr = document.createElement('tr');
+
+                // Заголовки строк по уровням
+                for (let level = 0; level < rowLevels; level++) {
+                    if (rowInBlock[level] === 0) {
+                        const th = document.createElement('th');
+                        const val = rowCombos[ri][level];
+                        th.textContent = `${currentRowAttrs[level]}: ${val}`;
+                        const span = rowSpanMap[level][blockIdx[level]];
+                        if (span > 1) th.rowSpan = span;
+                        tr.appendChild(th);
+                        rowInBlock[level]++;
+                        if (rowInBlock[level] === span) {
+                            rowInBlock[level] = 0;
+                            blockIdx[level]++;
+                        }
+                    } else {
+                        rowInBlock[level]++;
+                        if (rowInBlock[level] === rowSpanMap[level][blockIdx[level]]) {
+                            rowInBlock[level] = 0;
+                            blockIdx[level]++;
+                        }
+                        // Ячейка на этом уровне уже создана ранее – ничего не добавляем
+                    }
+                }
+
+                // Ячейки данных
+                for (let ci = 0; ci < colCombos.length; ci++) {
+                    const td = document.createElement('td');
+                    const result = getClass(rowCombos[ri], colCombos[ci]);
+                    td.textContent = result;
+                    td.style.padding = '8px';
+                    td.style.textAlign = 'center';
+                    if (result === 'ДА') td.style.backgroundColor = '#d4edda';
+                    else if (result === 'НЕТ') td.style.backgroundColor = '#f8d7da';
+                    tr.appendChild(td);
+                }
+                tbody.appendChild(tr);
+            }
+            table.appendChild(tbody);
+        }
+
         function handleAddColumn() {
             const newColName = prompt("Введите название нового столбца (атрибута):");
             if (!newColName || newColName.trim() === '') return;
-
             const existingHeaders = getAttributesFromTable();
             if (existingHeaders.includes(newColName) || newColName === targetAttribute) {
                 alert("Столбец с таким именем уже существует или совпадает с целевым атрибутом!");
                 return;
             }
-
             const headerRow = document.querySelector('#dataTable thead tr');
             const actionsHeader = headerRow.lastElementChild;
             const newTh = document.createElement('th');
@@ -333,14 +579,14 @@
             delBtn.title = `Удалить столбец "${newColName}"`;
             delBtn.onclick = handleDeleteColumn;
             newTh.appendChild(delBtn);
-            headerRow.insertBefore(newTh, actionsHeader);
-
+            actionsHeader.before(newTh);
             document.querySelectorAll('#dataTable tbody tr').forEach(tr => {
                 const newTd = document.createElement('td');
                 newTd.textContent = '?';
                 newTd.setAttribute('contenteditable', 'true');
                 tr.insertBefore(newTd, tr.lastElementChild);
             });
+            if (lastBuiltTree) buildSelectorsAndMatrix();
         }
 
         function handleDeleteColumn(event) {
@@ -351,6 +597,7 @@
                     row.children[colIndex].remove();
                 });
             }
+            if (lastBuiltTree) buildSelectorsAndMatrix();
         }
 
         function getAttributesFromTable() {
@@ -396,24 +643,27 @@
             document.getElementById('calculationStepsContainer').style.display = 'none';
             document.getElementById('finalTreeContainer').style.display = 'none';
             document.getElementById('resultsContainer').style.display = 'none';
+            document.getElementById('projection-section').style.display = 'none';
+            lastBuiltTree = null;
+            lastBuiltData = null;
+            currentRowAttrs = [];
+            currentColAttrs = [];
+            document.getElementById('projection-section').style.display = 'none';
         }
 
         function generateRandomData() {
             const currentData = parseDataFromTable();
             const attributes = getAttributesFromTable();
             if (currentData.length === 0) { alert("Таблица пуста. Добавьте строки."); return; }
-
             const possibleValues = {};
             const targetCol = targetAttribute;
             const allSamples = [...initialData, ...currentData];
             const targetValues = [...new Set(allSamples.map(item => item[targetCol]).filter(v => v && v !== '?'))];
             possibleValues[targetCol] = targetValues.length ? targetValues : ['ДА', 'НЕТ'];
-
             attributes.forEach(attr => {
                 const vals = [...new Set(allSamples.map(item => item[attr]).filter(v => v && v !== '?'))];
                 possibleValues[attr] = vals.length ? vals : ['?'];
             });
-
             const newData = currentData.map(row => {
                 const newRow = { id: row.id };
                 newRow[targetCol] = possibleValues[targetCol][Math.floor(Math.random() * possibleValues[targetCol].length)];
@@ -426,6 +676,11 @@
             document.getElementById('calculationStepsContainer').style.display = 'none';
             document.getElementById('finalTreeContainer').style.display = 'none';
             document.getElementById('resultsContainer').style.display = 'none';
+            document.getElementById('projection-section').style.display = 'none';
+            lastBuiltTree = null;
+            currentRowAttrs = [];
+            currentColAttrs = [];
+            document.getElementById('projection-section').style.display = 'none';
         }
 
         function calculateEntropy(dataSet) {
@@ -523,7 +778,6 @@
             const attributes = getAttributesFromTable();
             if (!currentData.length) { alert("Таблица пуста."); return; }
             if (!attributes.length) { alert("Нет атрибутов."); return; }
-
             document.getElementById('calculationStepsContainer').style.display = 'block';
             document.getElementById('steps-content').innerHTML = '';
             const allPossibleValues = attributes.reduce((acc, a) => {
@@ -532,24 +786,20 @@
             }, {});
             const tree = id3(currentData, attributes, 'Корневой узел', allPossibleValues);
             if (tree) {
-                
-                // Генерация и отображение формул
                 const logicalParts = treeToLogicalFormula(tree);
                 const logicalFormula = logicalParts.join(' ∨\n');
                 document.getElementById('math-formula-logical').textContent = logicalFormula;
-
                 const ifElseFormula = treeToIfThenElse(tree);
                 document.getElementById('math-formula-ifelse').textContent = ifElseFormula;
-
                 document.getElementById('math-formula-wrap').style.display = 'block';
-                lastBuiltTree = tree; lastBuiltData = currentData;
+                lastBuiltTree = tree;
+                lastBuiltData = currentData;
                 document.getElementById('finalTreeContainer').style.display = 'block';
                 renderTreeWithVis(tree);
                 document.getElementById('resultsContainer').style.display = 'block';
                 processAndDisplayResults(tree);
+                buildSelectorsAndMatrix();
                 document.getElementById('projection-section').style.display = 'block';
-                fillAxisSelects();
-                renderProjectionMatrix();
             }
         }
 
@@ -677,200 +927,140 @@
                 return results;
             }
         }
-
-        function buildProjectionMatrix(tree, data, attrX, attrY) {
-            const valuesX = [...new Set(data.map(r => r[attrX]).filter(v => v && v !== ''))].sort();
-            const valuesY = [...new Set(data.map(r => r[attrY]).filter(v => v && v !== ''))].sort();
+        
+       function buildProjectionMatrix(tree, data, attrX, attrY, attr3, attr4) {
+            // attrX = 'состояние неба', attrY = 'температура', attr3 = 'влажность', attr4 = 'ветер'
+            const valuesX = [...new Set(data.map(r => r[attrX]).filter(v => v))].sort();
+            const values3 = [...new Set(data.map(r => r[attr3]).filter(v => v))].sort();
+            const valuesY = [...new Set(data.map(r => r[attrY]).filter(v => v))].sort();
+            const values4 = [...new Set(data.map(r => r[attr4]).filter(v => v))].sort();
+            
             const cells = {};
-
-            const fixedColors = {
+            for (const vx of valuesX) {
+                for (const v3 of values3) {
+                    for (const vy of valuesY) {
+                        for (const v4 of values4) {
+                            const key = `${vx}|${v3}|${vy}|${v4}`;
+                            const matching = data.filter(r => r[attrX] === vx && r[attr3] === v3 && r[attrY] === vy && r[attr4] === v4);
+                            if (matching.length === 0) {
+                                cells[key] = null;
+                                continue;
+                            }
+                            const counts = {};
+                            const ids = [];
+                            for (const rec of matching) {
+                                const { leaf } = predictWithTreePath(tree, rec);
+                                counts[leaf] = (counts[leaf] || 0) + 1;
+                                ids.push(rec.id);
+                            }
+                            let maxClass = null, maxCnt = 0;
+                            for (const [c, cnt] of Object.entries(counts)) {
+                                if (cnt > maxCnt) { maxCnt = cnt; maxClass = c; }
+                            }
+                            ids.sort((a,b)=>a-b);
+                            cells[key] = { leaf: maxClass, ids, total: matching.length };
+                        }
+                    }
+                }
+            }
+            
+            const colors = {
                 "ДА": { bg: '#d4edda', border: '#28a745' },
                 "НЕТ": { bg: '#f8d7da', border: '#dc3545' }
             };
-            const fallbackColors = [
-                { bg: '#e8f4fd', border: '#3498db' },
-                { bg: '#f4e6ff', border: '#9b59b6' },
-                { bg: '#fef9e7', border: '#f1c40f' }
-            ];
+            const fallback = { bg: '#e8f4fd', border: '#3498db' };
             const colorMap = {};
-
-            for (const vy of valuesY) {
-                for (const vx of valuesX) {
-                    const groups = new Map(); // key: leaf + '|' + condition + '|' + secondaryValue
-                    let secondaryAttr = null;
-
-                    for (const record of data) {
-                        if (record[attrX] === vx && record[attrY] === vy) {
-                            const { leaf, path } = predictWithTreePath(tree, record);
-                            let secondaryValue = null;
-                            let remainingSteps = [...path];
-                            for (let i = 0; i < path.length; i++) {
-                                const stepAttr = path[i].split(' =')[0];
-                                if (stepAttr !== attrX && stepAttr !== attrY) {
-                                    if (secondaryAttr === null) secondaryAttr = stepAttr;
-                                    secondaryValue = path[i].split(' = ')[1] || path[i].split(' =')[1];
-                                    remainingSteps = path.slice(i + 1);
-                                    break;
-                                }
-                            }
-                            const relevantSteps = remainingSteps.filter(step => {
-                                const a = step.split(' =')[0];
-                                return a !== attrX && a !== attrY && a !== secondaryAttr;
-                            });
-                            let condition = relevantSteps.join(' ∧ ');
-                            if (condition === '') condition = 'всегда';
-                            const groupKey = leaf + '|' + condition + '|' + (secondaryValue || '');
-                            if (!groups.has(groupKey)) {
-                                groups.set(groupKey, { leaf, condition, secondaryValue, ids: [] });
-                            }
-                            groups.get(groupKey).ids.push(record.id);
-                        }
-                    }
-
-                    const secondaryGroups = new Map();
-                    for (const group of groups.values()) {
-                        const val = group.secondaryValue || '—';
-                        if (!secondaryGroups.has(val)) secondaryGroups.set(val, []);
-                        group.ids.sort((a, b) => a - b);
-                        secondaryGroups.get(val).push({ leaf: group.leaf, condition: group.condition, ids: group.ids });
-                    }
-
-                    for (const cards of secondaryGroups.values()) {
-                        for (const card of cards) {
-                            if (!colorMap[card.leaf]) {
-                                if (card.leaf === "ДА") colorMap[card.leaf] = fixedColors["ДА"];
-                                else if (card.leaf === "НЕТ") colorMap[card.leaf] = fixedColors["НЕТ"];
-                                else colorMap[card.leaf] = fallbackColors[Object.keys(colorMap).length % fallbackColors.length];
-                            }
-                        }
-                    }
-
-                    cells[vy + '|' + vx] = { secondaryAttr, groups: secondaryGroups };
+            for (const cell of Object.values(cells)) {
+                if (cell && !colorMap[cell.leaf]) {
+                    if (cell.leaf === "ДА") colorMap[cell.leaf] = colors["ДА"];
+                    else if (cell.leaf === "НЕТ") colorMap[cell.leaf] = colors["НЕТ"];
+                    else colorMap[cell.leaf] = fallback;
                 }
             }
-            return { valuesX, valuesY, cells, colorMap };
+            return { valuesX, values3, valuesY, values4, cells, colorMap };
         }
-
-
 
         function renderProjectionMatrix() {
             if (!lastBuiltTree || !lastBuiltData) return;
-
-            let attrX = document.getElementById('axisXSelect').value;
-            let attrY = document.getElementById('axisYSelect').value;
-            const attrs = getAttributesFromTable();
-
-            if (attrX === attrY && attrs.length >= 2) {
-                if (document.getElementById('axisXSelect').value === attrX) {
-                    document.getElementById('axisYSelect').value = attrs.find(a => a !== attrX);
-                } else {
-                    document.getElementById('axisXSelect').value = attrs.find(a => a !== attrY);
-                }
-                attrX = document.getElementById('axisXSelect').value;
-                attrY = document.getElementById('axisYSelect').value;
-            }
-
-            const { valuesX, valuesY, cells, colorMap } = buildProjectionMatrix(lastBuiltTree, lastBuiltData, attrX, attrY);
+            const attrX = 'состояние неба';
+            const attrY = 'температура';
+            const attr3 = 'влажность';
+            const attr4 = 'ветер';
+            const { valuesX, values3, valuesY, values4, cells, colorMap } = buildProjectionMatrix(lastBuiltTree, lastBuiltData, attrX, attrY, attr3, attr4);
+            
             const table = document.getElementById('projection-matrix');
             table.innerHTML = '';
-
-            // Заголовок (ось X)
+            
+            // === ЗАГОЛОВОК СТОЛБЦОВ (двухуровневый) ===
             const thead = document.createElement('thead');
-            let tr = document.createElement('tr');
-            tr.appendChild(document.createElement('th')); // пустая ячейка
-            valuesX.forEach(vx => {
+            // Первая строка: группировка по X
+            let tr1 = document.createElement('tr');
+            const corner = document.createElement('th');
+            corner.rowSpan = 2;
+            corner.textContent = '';
+            tr1.appendChild(corner);
+            for (const vx of valuesX) {
                 const th = document.createElement('th');
+                th.colSpan = values3.length;
                 th.textContent = vx;
-                tr.appendChild(th);
-            });
-            thead.appendChild(tr);
+                tr1.appendChild(th);
+            }
+            thead.appendChild(tr1);
+            // Вторая строка: значения третьего атрибута
+            let tr2 = document.createElement('tr');
+            for (const element of valuesX) {
+                for (const v3 of values3) {
+                    const th = document.createElement('th');
+                    th.textContent = v3;
+                    tr2.appendChild(th);
+                }
+            }
+            thead.appendChild(tr2);
             table.appendChild(thead);
-
-            // Тело (ось Y)
+            
+            // === ЗАГОЛОВКИ СТРОК (двухуровневые) ===
             const tbody = document.createElement('tbody');
             for (const vy of valuesY) {
-                tr = document.createElement('tr');
-                const th = document.createElement('th');
-                th.className = 'axis-y';
-                th.textContent = vy;
-                tr.appendChild(th);
-
-                for (const vx of valuesX) {
-                    const key = vy + '|' + vx;
-                    const cellData = cells[key];
-                    const td = document.createElement('td');
-
-                    if (cellData && cellData.groups && cellData.groups.size > 0) {
-                        const { secondaryAttr, groups } = cellData;
-
-                        if (secondaryAttr && groups.size > 1) {
-                            // Внутренняя таблица для разных значений вторичного атрибута
-                            const innerTable = document.createElement('table');
-                            innerTable.style.width = '100%';
-                            innerTable.style.borderCollapse = 'collapse';
-
-                            for (const [secVal, cards] of groups.entries()) {
-                                const row = document.createElement('tr');
-
-                                // Заголовок строки: вторичный атрибут = значение
-                                const thSec = document.createElement('th');
-                                thSec.textContent = `${secondaryAttr} = ${secVal}`;
-                                thSec.style.backgroundColor = '#f1f3f5';
-                                thSec.style.border = '1px solid #dee2e6';
-                                thSec.style.padding = '4px';
-                                thSec.style.fontWeight = 'normal';
-                                thSec.style.verticalAlign = 'top';
-                                row.appendChild(thSec);
-
-                                // Ячейка с карточками (сетка)
-                                const tdCards = document.createElement('td');
-                                tdCards.style.border = '1px solid #dee2e6';
-                                tdCards.style.padding = '4px';
-
-                                const gridContainer = document.createElement('div');
-                                gridContainer.className = 'cards-grid';
-                                for (const card of cards) {
-                                    const style = colorMap[card.leaf];
-                                    const block = document.createElement('div');
-                                    block.style.backgroundColor = style.bg;
-                                    block.style.border = `1px solid ${style.border}`;
-                                    block.style.borderRadius = '4px';
-                                    block.style.padding = '4px';
-                                    const idsStr = card.ids.length ? `ID: ${card.ids.join(', ')}` : 'ID: —';
-                                    block.innerHTML = `<strong>${card.leaf}</strong><br><span style="font-size:0.7rem;">${card.condition}</span><br><span style="font-size:0.65rem;">${idsStr}</span>`;
-                                    gridContainer.appendChild(block);
-                                }
-                                tdCards.appendChild(gridContainer);
-                                row.appendChild(tdCards);
-                                innerTable.appendChild(row);
-                            }
-                            td.appendChild(innerTable);
-                        } else {
-                            // Простой набор карточек (без вторичного атрибута)
-                            const gridContainer = document.createElement('div');
-                            gridContainer.className = 'cards-grid';
-                            for (const cards of groups.values()) {
-                                for (const card of cards) {
-                                    const style = colorMap[card.leaf];
-                                    const block = document.createElement('div');
-                                    block.style.backgroundColor = style.bg;
-                                    block.style.border = `1px solid ${style.border}`;
-                                    block.style.borderRadius = '6px';
-                                    block.style.padding = '6px 8px';
-                                    const idsStr = card.ids.length ? `ID: ${card.ids.join(', ')}` : 'ID: —';
-                                    block.innerHTML = `<strong>${card.leaf}</strong><br><span style="font-size:0.75rem;">${card.condition}</span><br><span style="font-size:0.7rem;">${idsStr}</span>`;
-                                    gridContainer.appendChild(block);
-                                }
-                            }
-                            td.appendChild(gridContainer);
-                        }
-                    } else {
-                        td.textContent = '—';
-                        td.className = 'cell-empty';
+                // Для каждого значения Y создаём блок строк по количеству values4
+                for (let idx4 = 0; idx4 < values4.length; idx4++) {
+                    const v4 = values4[idx4];
+                    const tr = document.createElement('tr');
+                    
+                    // Первый уровень строк: значение Y (объединяем по вертикали)
+                    if (idx4 === 0) {
+                        const thY = document.createElement('th');
+                        thY.rowSpan = values4.length;
+                        thY.textContent = vy;
+                        tr.appendChild(thY);
                     }
-                    tr.appendChild(td);
+                    // Второй уровень: значение четвёртого атрибута (ветер)
+                    const thV4 = document.createElement('th');
+                    thV4.textContent = v4;
+                    tr.appendChild(thV4);
+                    
+                    // Ячейки данных
+                    for (const vx of valuesX) {
+                        for (const v3 of values3) {
+                            const key = `${vx}|${v3}|${vy}|${v4}`;
+                            const cell = cells[key];
+                            const td = document.createElement('td');
+                            if (cell) {
+                                const style = colorMap[cell.leaf];
+                                td.style.backgroundColor = style.bg;
+                                td.style.border = `1px solid ${style.border}`;
+                                td.style.padding = '8px';
+                                td.style.textAlign = 'center';
+                                const idsStr = cell.ids.length ? `ID: ${cell.ids.join(', ')}` : '';
+                                td.innerHTML = `<strong>${cell.leaf}</strong><br><span style="font-size:0.7rem;">(${cell.total})</span><br><span style="font-size:0.6rem;">${idsStr}</span>`;
+                            } else {
+                                td.textContent = '—';
+                                td.className = 'cell-empty';
+                            }
+                            tr.appendChild(td);
+                        }
+                    }
+                    tbody.appendChild(tr);
                 }
-                tbody.appendChild(tr);
             }
             table.appendChild(tbody);
 
@@ -958,7 +1148,6 @@
             const ifElseDiv = document.getElementById('formulaIfElse');
             const btnLog = document.getElementById('formulaLogBtn');
             const btnIf = document.getElementById('formulaIfBtn');
-
             if (btnLog && btnIf) {
                 btnLog.addEventListener('click', () => {
                     logicalDiv.style.display = 'block';
@@ -983,9 +1172,6 @@
             document.getElementById('addColumnButton').addEventListener('click', handleAddColumn);
             document.getElementById('randomTableButton').addEventListener('click', generateRandomData);
             document.getElementById('resetButton').addEventListener('click', handleReset);
-            document.getElementById('axisXSelect').addEventListener('change', renderProjectionMatrix);
-            document.getElementById('axisYSelect').addEventListener('change', renderProjectionMatrix);
-           
         };
     </script>
 </body>
