@@ -7,6 +7,7 @@
 
     <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
 
+    
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         body { background: #f4f7f6; min-height: 100vh; display: flex; justify-content: center; align-items: flex-start; padding: 40px 20px; color: #343a40; }
@@ -677,50 +678,60 @@
         }
 
         function buildProjectionMatrix(tree, data, attrX, attrY) {
-            const valuesX = [...new Set(data.map(r => r[attrX]).filter(v => v && v !== ''))].sort();
-            const valuesY = [...new Set(data.map(r => r[attrY]).filter(v => v && v !== ''))].sort();
-            const cells = {};
-            // Фиксированные цвета для "да" и "нет"
-            const fixedColors = {
-                "да": { bg: '#d4edda', border: '#28a745' },  // зелёный
-                "нет": { bg: '#f8d7da', border: '#dc3545' } // красный
-            };
-            const fallbackColors = [
-                { bg: '#e8f4fd', border: '#3498db' }, // синий
-                { bg: '#f4e6ff', border: '#9b59b6' }, // фиолетовый
-                { bg: '#fef9e7', border: '#f1c40f' }  // жёлтый
-            ];
-            const colorMap = {};
+    const valuesX = [...new Set(data.map(r => r[attrX]).filter(v => v && v !== ''))].sort();
+    const valuesY = [...new Set(data.map(r => r[attrY]).filter(v => v && v !== ''))].sort();
+    const cells = {}; // cells[vy+'|'+vx] = массив карточек {leaf, condition, ids}
 
-            for (const vy of valuesY) {
-                for (const vx of valuesX) {
-                    const partialRecord = { [attrX]: vx, [attrY]: vy };
-                    const allPaths = getAllLeavesWithPaths(tree, partialRecord, []);
-                    const cards = [];
-                    for (const { leaf, path } of allPaths) {
-                        const relevantSteps = path.filter(step => {
-                            const attr = step.split(' =')[0];
-                            return attr !== attrX && attr !== attrY;
-                        });
-                        let condition = relevantSteps.join(' ∧ ');
-                        if (condition === '') condition = 'всегда';
-                        cards.push({ leaf, condition });
-                        // Назначаем цвет: для "да" и "нет" — фиксированный, для остальных — из резерва
-                        if (!colorMap[leaf]) {
-                            if (leaf === "да") {
-                                colorMap[leaf] = fixedColors["да"];
-                            } else if (leaf === "нет") {
-                                colorMap[leaf] = fixedColors["нет"];
-                            } else {
-                                colorMap[leaf] = fallbackColors[Object.keys(colorMap).length % fallbackColors.length];
-                            }
-                        }
+    const fixedColors = {
+        "да": { bg: '#d4edda', border: '#28a745' },
+        "нет": { bg: '#f8d7da', border: '#dc3545' }
+    };
+    const fallbackColors = [
+        { bg: '#e8f4fd', border: '#3498db' },
+        { bg: '#f4e6ff', border: '#9b59b6' },
+        { bg: '#fef9e7', border: '#f1c40f' }
+    ];
+    const colorMap = {};
+
+    for (const vy of valuesY) {
+        for (const vx of valuesX) {
+            // Группировка: ключ = leaf + '|' + condition
+            const groups = new Map(); // key -> { leaf, condition, ids }
+
+            for (const record of data) {
+                if (record[attrX] === vx && record[attrY] === vy) {
+                    const { leaf, path } = predictWithTreePath(tree, record);
+                    // Убираем из пути условия, относящиеся к осям
+                    const relevantSteps = path.filter(step => {
+                        const attr = step.split(' =')[0];
+                        return attr !== attrX && attr !== attrY;
+                    });
+                    let condition = relevantSteps.join(' ∧ ');
+                    if (condition === '') condition = 'всегда';
+                    const key = leaf + '|' + condition;
+                    if (!groups.has(key)) {
+                        groups.set(key, { leaf, condition, ids: [] });
                     }
-                    cells[vy + '|' + vx] = cards;
+                    groups.get(key).ids.push(record.id);
                 }
             }
-            return { valuesX, valuesY, cells, colorMap };
+
+            // Преобразуем группы в массив карточек
+            const cards = Array.from(groups.values()).map(card => {
+                card.ids.sort((a,b) => a-b);
+                // Назначаем цвет, если ещё нет
+                if (!colorMap[card.leaf]) {
+                    if (card.leaf === "да") colorMap[card.leaf] = fixedColors["да"];
+                    else if (card.leaf === "нет") colorMap[card.leaf] = fixedColors["нет"];
+                    else colorMap[card.leaf] = fallbackColors[Object.keys(colorMap).length % fallbackColors.length];
+                }
+                return card;
+            });
+            cells[vy + '|' + vx] = cards;
         }
+    }
+    return { valuesX, valuesY, cells, colorMap };
+}
 
         function renderProjectionMatrix() {
             if(!lastBuiltTree || !lastBuiltData) return;
@@ -761,7 +772,7 @@
                             block.style.padding = '6px 8px';
                             block.style.fontSize = '0.85rem';
                             // Здесь можно добавить количество путей или просто условие
-                            block.innerHTML = `<strong>${sub.leaf}</strong><br><span style="font-size:0.75rem;">${sub.condition}</span>`;
+                            block.innerHTML = `<strong>${sub.leaf}</strong> (ID: ${sub.ids.join(', ')})<br><span style="font-size:0.75rem;">${sub.condition}</span><br><span style="font-size:0.7rem; color:#495057;"></span>`;
                             td.appendChild(block);
                         }
                     } else {
